@@ -72,6 +72,10 @@
     .vtbtn.active { background:var(--gold-subtle); border-color:var(--border-hover); color:var(--gold); }
     .settings-btn { background:transparent; border:1px solid var(--border); color:var(--text-muted); border-radius:var(--radius); padding:0.3rem 0.5rem; font-size:1rem; transition:all var(--transition); flex-shrink:0; }
     .settings-btn:hover { border-color:var(--gold); color:var(--gold); }
+    .user-pill { display:flex; align-items:center; gap:0.5rem; flex-shrink:0; }
+    .user-email { font-size:0.75rem; color:var(--text-muted); max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .signout-btn { background:transparent; border:1px solid var(--border); color:var(--text-muted); border-radius:var(--radius); padding:0.3rem 0.6rem; font-size:0.75rem; transition:all var(--transition); flex-shrink:0; }
+    .signout-btn:hover { border-color:#c0392b; color:#c0392b; }
 
     /* ── Main ───────────────────────────────────────────────── */
     main { max-width:960px; margin:0 auto; padding:2rem 1.5rem 4rem; }
@@ -231,6 +235,10 @@
       <button id="btn-view-list" class="vtbtn" title="List view">≡</button>
     </div>
     <button id="btn-settings" class="settings-btn" title="Settings">&#9881;</button>
+    <div class="user-pill">
+      <span id="user-email" class="user-email"></span>
+      <button id="btn-signout" class="signout-btn" title="Sign out">Sign out</button>
+    </div>
   </header>
 
   <main>
@@ -1332,6 +1340,32 @@
     document.addEventListener('DOMContentLoaded', () => { bindStaticEvents(); render(); });
 
   }());
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script type="module">
+    import { Auth, db } from './supabase-client.js';
+
+    // ── Auth guard: redirect to login if not signed in ───────
+    const { data: { session } } = await db.auth.getSession();
+    if (!session) {
+      window.location.replace('login.html');
+    } else {
+      // Show user email in header
+      const email = session.user.email || session.user.user_metadata?.full_name || '';
+      document.getElementById('user-email').textContent = email;
+    }
+
+    // ── Sign out ─────────────────────────────────────────────
+    document.getElementById('btn-signout').addEventListener('click', async () => {
+      await Auth.signOut();
+      window.location.replace('login.html');
+    });
+
+    // ── Keep session alive across tab changes ────────────────
+    db.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') window.location.replace('login.html');
+    });
   </script>
 </body>
 </html>
