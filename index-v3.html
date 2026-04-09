@@ -1,0 +1,2816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0a0a0a">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://nominatim.openstreetmap.org; img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; font-src 'self'; frame-ancestors 'none';">
+  <title>Road Visit Tracker</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
+        crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+          crossorigin="anonymous"></script>
+  <style>
+    /* ── Custom Properties ─────────────────────────────────── */
+    :root {
+      --bg:           #0a0a0a;
+      --surface:      #1a1a1a;
+      --surface-2:    #222222;
+      --gold:         #C9A84C;
+      --gold-dim:     #8a6f2e;
+      --gold-subtle:  rgba(201,168,76,0.08);
+      --text:         #e8e4d9;
+      --text-muted:   #7a7060;
+      --border:       rgba(201,168,76,0.22);
+      --border-hover: rgba(201,168,76,0.60);
+      --danger:       #c0392b;
+      --danger-dim:   rgba(192,57,43,0.15);
+      --radius:       7px;
+      --radius-lg:    10px;
+      --transition:   0.2s ease;
+      --font-serif:   Georgia,'Times New Roman',serif;
+      --font-body:    system-ui,-apple-system,sans-serif;
+      --header-h:     60px;
+    }
+
+    /* ── Reset ─────────────────────────────────────────────── */
+    *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+    html { scroll-behavior:smooth; }
+    body { background:var(--bg); color:var(--text); font-family:var(--font-body); font-size:15px; line-height:1.6; min-height:100vh; }
+    button { cursor:pointer; font-family:inherit; font-size:inherit; }
+    input,textarea,select { font-family:inherit; font-size:inherit; color:var(--text); }
+    ul { list-style:none; }
+
+    /* ── Header ────────────────────────────────────────────── */
+    .app-header {
+      position:sticky; top:0; z-index:100;
+      height:var(--header-h);
+      background:rgba(10,10,10,0.93);
+      backdrop-filter:blur(8px);
+      border-bottom:1px solid var(--gold-dim);
+      display:flex; align-items:center;
+      padding:0 1.25rem; gap:0.75rem;
+    }
+    .app-title { font-family:var(--font-serif); font-size:1.15rem; font-weight:normal; color:var(--gold); letter-spacing:0.05em; white-space:nowrap; }
+    .header-divider { width:1px; height:1.4rem; background:var(--gold-dim); opacity:0.5; flex-shrink:0; }
+    .breadcrumb { display:flex; align-items:center; gap:0.4rem; flex:1; overflow:hidden; min-width:0; }
+    .bc-sep { color:var(--gold-dim); font-size:0.8rem; flex-shrink:0; }
+    .bc-item { color:var(--text-muted); font-size:0.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .bc-item.link { color:var(--gold); cursor:pointer; flex-shrink:0; }
+    .bc-item.link:hover { text-decoration:underline; }
+    .header-search {
+      width:180px; flex-shrink:0;
+      background:var(--surface-2); border:1px solid var(--border);
+      border-radius:var(--radius); padding:0.35rem 0.7rem;
+      color:var(--text); font-size:0.82rem; transition:border-color var(--transition);
+    }
+    .header-search:focus { outline:none; border-color:var(--gold); }
+    .header-search::placeholder { color:var(--text-muted); }
+    .view-toggle-group { display:flex; gap:0.2rem; flex-shrink:0; }
+    .vtbtn {
+      background:transparent; border:1px solid var(--border);
+      color:var(--text-muted); border-radius:var(--radius);
+      padding:0.3rem 0.5rem; font-size:1rem; line-height:1;
+      transition:all var(--transition);
+    }
+    .vtbtn:hover { border-color:var(--border-hover); color:var(--gold); }
+    .vtbtn.active { background:var(--gold-subtle); border-color:var(--border-hover); color:var(--gold); }
+    .settings-btn { background:transparent; border:1px solid var(--border); color:var(--text-muted); border-radius:var(--radius); padding:0.3rem 0.5rem; font-size:1rem; transition:all var(--transition); flex-shrink:0; }
+    .settings-btn:hover { border-color:var(--gold); color:var(--gold); }
+    .user-pill { display:flex; align-items:center; gap:0.5rem; flex-shrink:0; }
+    .user-email { font-size:0.75rem; color:var(--text-muted); max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .signout-btn { background:transparent; border:1px solid var(--border); color:var(--text-muted); border-radius:var(--radius); padding:0.3rem 0.6rem; font-size:0.75rem; transition:all var(--transition); flex-shrink:0; }
+    .signout-btn:hover { border-color:#c0392b; color:#c0392b; }
+
+    /* ── Main ───────────────────────────────────────────────── */
+    main { max-width:960px; margin:0 auto; padding:2rem 1.5rem 4rem; }
+
+    /* ── View Header ─────────────────────────────────────────── */
+    .view-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; gap:1rem; flex-wrap:wrap; }
+    .view-title { font-family:var(--font-serif); font-size:1.5rem; font-weight:normal; color:var(--text); }
+    .view-title-sub { font-size:0.8rem; color:var(--text-muted); display:block; margin-top:0.1rem; }
+    .view-actions { display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; }
+
+    /* ── Buttons ─────────────────────────────────────────────── */
+    .btn { display:inline-flex; align-items:center; gap:0.35rem; padding:0.45rem 1rem; border-radius:var(--radius); border:1px solid transparent; font-size:0.875rem; transition:all var(--transition); white-space:nowrap; }
+    .btn-primary { background:var(--gold); color:#0a0a0a; border-color:var(--gold); font-weight:600; }
+    .btn-primary:hover { background:#d9b85c; border-color:#d9b85c; }
+    .btn-ghost { background:transparent; color:var(--gold); border-color:var(--border-hover); }
+    .btn-ghost:hover { background:var(--gold-subtle); }
+    .btn-danger { background:transparent; color:var(--danger); border-color:rgba(192,57,43,0.4); }
+    .btn-danger:hover { background:var(--danger-dim); }
+    .btn-sm { padding:0.3rem 0.65rem; font-size:0.78rem; }
+    .btn:focus-visible { outline:2px solid var(--gold); outline-offset:2px; }
+
+    /* ── Card Grid ───────────────────────────────────────────── */
+    .card-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:1.1rem; }
+
+    /* ── Item Card (places + roads) ──────────────────────────── */
+    .item-card {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius-lg); padding:1rem 1rem 0.85rem;
+      cursor:pointer; transition:all var(--transition);
+      display:flex; flex-direction:column; gap:0.4rem; position:relative;
+    }
+    .item-card:hover { border-color:var(--border-hover); transform:translateY(-2px); box-shadow:0 6px 24px rgba(201,168,76,0.07); }
+    .card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem; }
+    .card-name { font-family:var(--font-serif); font-size:1rem; color:var(--text); line-height:1.3; flex:1; }
+    .card-actions { display:flex; gap:0.2rem; flex-shrink:0; }
+    .icon-btn { background:transparent; border:none; padding:0.2rem 0.3rem; border-radius:4px; color:var(--text-muted); font-size:0.9rem; line-height:1; transition:all var(--transition); }
+    .icon-btn:hover { color:var(--gold); background:var(--gold-subtle); }
+    .icon-btn.del:hover { color:var(--danger); background:var(--danger-dim); }
+    .type-badge { display:inline-block; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--gold-dim); font-weight:600; }
+    .card-sub { font-size:0.75rem; color:var(--text-muted); }
+    .card-postcode { font-size:0.75rem; color:var(--gold); font-weight:600; letter-spacing:0.03em; }
+    .road-last-visit { font-size:0.72rem; color:var(--text-muted); margin-top:3px; }
+    .road-last-visit.has-visit { color:var(--gold-dim); }
+    .road-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+    .road-tag-chip { font-size:0.68rem; padding:2px 8px; border-radius:20px; font-weight:500; white-space:nowrap; }
+    .tag-toggle-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+    .tag-toggle-chip { font-size:0.78rem; padding:4px 12px; border-radius:20px; border:1px solid var(--border); background:transparent; color:var(--text-muted); cursor:pointer; transition:all 0.15s; }
+    .tag-toggle-chip.active { background:rgba(201,168,76,0.12); border-color:var(--gold); color:var(--gold); }
+    .manage-tags-list { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+    .manage-tag-row { display:flex; align-items:center; gap:8px; }
+    .manage-tag-swatch { width:14px; height:14px; border-radius:50%; flex-shrink:0; }
+    .tag-color-options { display:flex; gap:6px; margin-top:6px; }
+    .tag-color-opt { width:20px; height:20px; border-radius:50%; border:2px solid transparent; cursor:pointer; transition:border-color 0.15s; }
+    .tag-color-opt.selected { border-color:var(--text); }
+
+    /* ── List View ───────────────────────────────────────────── */
+    .list-view { display:flex; flex-direction:column; gap:0.45rem; }
+    .list-item {
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius); padding:0.7rem 1rem;
+      display:flex; align-items:center; gap:0.75rem;
+      cursor:pointer; transition:all var(--transition);
+    }
+    .list-item:hover { border-color:var(--border-hover); background:rgba(201,168,76,0.03); }
+    .list-badge { min-width:72px; }
+    .list-name { flex:1; font-size:0.92rem; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .list-sub { font-size:0.75rem; color:var(--text-muted); white-space:nowrap; }
+    .list-postcode { font-size:0.75rem; color:var(--gold); font-weight:600; white-space:nowrap; margin-right:0.5rem; }
+    .list-actions { display:flex; gap:0.2rem; flex-shrink:0; }
+
+    /* ── Section separator ───────────────────────────────────── */
+    .section-sep { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--gold-dim); margin:1.5rem 0 0.75rem; padding-bottom:0.4rem; border-bottom:1px solid var(--border); }
+
+    /* ── Number Grid ─────────────────────────────────────────── */
+    .number-grid-wrap { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.25rem; display:flex; flex-direction:column; gap:1.1rem; }
+    .number-row { display:flex; flex-direction:column; gap:0.5rem; }
+    .number-row-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--gold-dim); }
+    .number-tiles { display:flex; flex-wrap:wrap; gap:0.5rem; }
+    .number-tile { min-width:48px; height:48px; padding:0 0.5rem; border-radius:var(--radius); border:1px solid var(--border); font-size:0.85rem; font-weight:600; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all var(--transition); background:var(--surface-2); color:var(--text-muted); }
+    .number-tile:hover { border-color:var(--border-hover); color:var(--text); }
+    .number-tile.visited { background:rgba(201,168,76,0.15); border-color:var(--gold-dim); color:var(--gold); }
+    .number-tile.visited:hover { background:rgba(201,168,76,0.25); }
+
+    /* ── Modal ───────────────────────────────────────────────── */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.78); display:flex; align-items:center; justify-content:center; z-index:200; padding:1rem; overflow-y:auto; }
+    .modal-box { background:var(--surface); border:1px solid var(--border-hover); border-radius:var(--radius-lg); padding:1.75rem; width:min(500px,100%); position:relative; box-shadow:0 20px 60px rgba(0,0,0,0.6); margin:auto; }
+    .modal-close { position:absolute; top:0.85rem; right:0.9rem; background:transparent; border:none; color:var(--text-muted); font-size:1.3rem; line-height:1; padding:0.2rem; transition:color var(--transition); }
+    .modal-close:hover { color:var(--gold); }
+    .modal-title { font-family:var(--font-serif); font-size:1.2rem; font-weight:normal; color:var(--text); margin-bottom:1.35rem; padding-right:2rem; }
+    .modal-field { margin-bottom:1rem; }
+    .modal-label { display:block; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--gold-dim); margin-bottom:0.4rem; }
+    .modal-input,.modal-textarea { width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.85rem; color:var(--text); transition:border-color var(--transition); }
+    .modal-input:focus,.modal-textarea:focus { outline:none; border-color:var(--gold); }
+    .modal-input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter:invert(0.7); cursor:pointer; }
+    .modal-textarea { min-height:85px; resize:vertical; }
+    .modal-error { font-size:0.78rem; color:#e07070; margin-top:0.3rem; display:none; }
+    .modal-error.visible { display:block; }
+    .modal-footer { display:flex; justify-content:flex-end; gap:0.65rem; margin-top:1.35rem; }
+    .modal-footer.spread { justify-content:space-between; }
+    .modal-row { display:grid; grid-template-columns:1fr 1fr; gap:0.65rem; }
+
+    /* ── Outcome Chips ───────────────────────────────────────── */
+    .outcome-chips { display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.65rem; }
+    .outcome-chip { padding:0.28rem 0.7rem; border-radius:20px; border:1px solid var(--border); background:var(--surface-2); color:var(--text-muted); font-size:0.78rem; cursor:pointer; transition:all var(--transition); user-select:none; }
+    .outcome-chip:hover { border-color:var(--border-hover); color:var(--text); }
+    .outcome-chip.selected { background:rgba(201,168,76,0.18); border-color:var(--gold); color:var(--gold); }
+
+    /* ── Address Panel ───────────────────────────────────────── */
+    .addr-panel-number { font-family:var(--font-serif); font-size:1.4rem; color:var(--text); }
+    .addr-panel-road { font-size:0.78rem; color:var(--text-muted); margin-top:0.1rem; margin-bottom:1rem; }
+    .addr-last-visit { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:0.7rem 0.9rem; margin-bottom:0.85rem; }
+    .addr-last-label { font-size:0.68rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--gold-dim); margin-bottom:0.25rem; }
+    .addr-last-outcome { font-size:0.88rem; color:var(--text); }
+    .addr-last-meta { font-size:0.72rem; color:var(--text-muted); margin-top:0.2rem; }
+    .history-toggle-btn { background:none; border:none; color:var(--gold-dim); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.07em; cursor:pointer; padding:0; margin-bottom:0.5rem; transition:color var(--transition); }
+    .history-toggle-btn:hover { color:var(--gold); }
+    .history-section { max-height:0; overflow:hidden; transition:max-height 0.3s ease; }
+    .history-section.expanded { max-height:1400px; }
+    .history-list { display:flex; flex-direction:column; gap:0.55rem; margin-bottom:0.75rem; }
+    .history-item { border-left:2px solid var(--gold-dim); padding-left:0.8rem; }
+    .history-item-date { font-size:0.72rem; color:var(--gold); margin-bottom:0.1rem; }
+    .history-item-outcome { font-size:0.85rem; color:var(--text); line-height:1.5; }
+    .history-item-by { font-size:0.7rem; color:var(--text-muted); margin-top:0.12rem; }
+    .history-empty { font-size:0.82rem; color:var(--text-muted); font-style:italic; }
+
+    /* ── Settings ────────────────────────────────────────────── */
+    .settings-chip-list { display:flex; flex-wrap:wrap; gap:0.4rem; margin-top:0.45rem; }
+    .settings-chip { display:inline-flex; align-items:center; gap:0.3rem; padding:0.22rem 0.6rem; background:var(--surface-2); border:1px solid var(--border); border-radius:20px; font-size:0.76rem; color:var(--text); }
+    .settings-chip-remove { background:none; border:none; color:var(--text-muted); font-size:0.88rem; line-height:1; padding:0; cursor:pointer; transition:color var(--transition); }
+    .settings-chip-remove:hover { color:var(--danger); }
+    .settings-add-row { display:flex; gap:0.45rem; margin-top:0.55rem; }
+    .settings-add-row .modal-input { flex:1; }
+
+    /* ── Import Feedback ─────────────────────────────────────── */
+    .import-feedback { font-size:0.8rem; padding:0.45rem 0.85rem; border-radius:var(--radius); margin-bottom:0.85rem; border:1px solid transparent; }
+    .import-feedback.success { background:rgba(201,168,76,0.1); border-color:var(--gold-dim); color:var(--gold); }
+    .import-feedback.error { background:rgba(224,112,112,0.1); border-color:rgba(224,112,112,0.4); color:#e07070; }
+
+    /* ── Empty State ─────────────────────────────────────────── */
+    .empty-state { grid-column:1/-1; padding:2.5rem 1.5rem; text-align:center; color:var(--text-muted); font-size:0.88rem; border:1px dashed var(--border); border-radius:var(--radius-lg); }
+    .empty-state-hint { margin-top:0.35rem; font-size:0.78rem; color:var(--gold-dim); }
+    .confirm-msg { font-size:0.92rem; color:var(--text); margin-bottom:1.35rem; line-height:1.6; }
+
+    /* ── Utility ─────────────────────────────────────────────── */
+    .hidden { display:none !important; }
+
+    /* ── Responsive ──────────────────────────────────────────── */
+    @media (max-width:560px) {
+      main { padding:1.25rem 0.85rem 3rem; }
+      .app-header { padding:0 0.85rem; gap:0.5rem; }
+      .header-search { width:120px; }
+      .app-title { font-size:1rem; }
+      .card-grid { grid-template-columns:1fr; }
+      .modal-box { padding:1.35rem 1.1rem; }
+      .modal-row { grid-template-columns:1fr; }
+      .number-tile { min-width:44px; height:44px; font-size:0.78rem; }
+      .view-header { flex-direction:column; align-items:flex-start; }
+    }
+  /* ── Leaflet Map Modal ───────────────────────────────────── */
+  .map-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:1rem; }
+  .map-modal-box { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); width:100%; max-width:640px; overflow:hidden; }
+  .map-modal-header { padding:0.85rem 1.1rem; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); }
+  .map-modal-header h3 { font-family:var(--font-serif); color:var(--gold); font-size:1rem; font-weight:normal; }
+  #leaflet-map { width:100%; height:340px; }
+  .map-modal-footer { padding:0.75rem 1.1rem; display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border); gap:0.75rem; }
+  .map-coords { font-size:0.78rem; color:var(--text-muted); flex:1; }
+
+  /* ── Find Location Screen ───────────────────────────────── */
+  .find-location-screen { display:flex; align-items:center; justify-content:center; min-height:calc(100vh - var(--header-h)); padding:2rem 1rem; }
+  .find-location-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:2.5rem 2rem; width:100%; max-width:520px; box-shadow:0 12px 40px rgba(0,0,0,0.4); }
+  .find-location-title { font-family:var(--font-serif); font-size:1.4rem; color:var(--gold); margin-bottom:0.5rem; }
+  .find-location-sub { font-size:0.85rem; color:var(--text-muted); margin-bottom:1.5rem; line-height:1.6; }
+  .join-result-card { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:0.75rem 1rem; display:flex; align-items:center; gap:0.75rem; }
+  .join-result-info { flex:1; min-width:0; }
+  .join-result-name { font-size:0.88rem; color:var(--text); font-weight:500; }
+  .join-result-addr { font-size:0.75rem; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .join-request-status { font-size:0.75rem; padding:0.25rem 0.6rem; border-radius:20px; border:1px solid; }
+  .join-request-status.pending  { color:#C9A84C; border-color:#C9A84C; }
+  .join-request-status.approved { color:#50c878; border-color:#50c878; }
+  .join-request-status.rejected { color:#e05c5c; border-color:#e05c5c; }
+  .find-location-sep { font-size:0.78rem; color:var(--text-muted); margin:1rem 0 0.5rem; }
+
+  /* ── OSM Location Search ────────────────────────────────── */
+  .loc-tabs { display:flex; border-bottom:1px solid var(--border); margin-bottom:1.1rem; }
+  .loc-tab { flex:1; padding:0.55rem; text-align:center; font-size:0.85rem; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:all var(--transition); user-select:none; }
+  .loc-tab.active { color:var(--gold); border-bottom-color:var(--gold); }
+  .osm-search-row { display:flex; gap:0.5rem; margin-bottom:0.75rem; }
+  .osm-search-row .modal-input { flex:1; }
+  .osm-results { display:flex; flex-direction:column; gap:0.5rem; max-height:260px; overflow-y:auto; margin-bottom:0.75rem; }
+  .osm-result-card { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius); padding:0.65rem 0.85rem; cursor:pointer; transition:all var(--transition); }
+  .osm-result-card:hover, .osm-result-card.selected { border-color:var(--gold); background:var(--gold-subtle); }
+  .osm-result-name { font-size:0.88rem; color:var(--text); font-weight:500; }
+  .osm-result-addr { font-size:0.75rem; color:var(--text-muted); margin-top:0.2rem; }
+  .osm-status { font-size:0.82rem; color:var(--text-muted); text-align:center; padding:0.75rem; }
+  .loc-type-row { display:flex; gap:0.5rem; margin-bottom:0.75rem; }
+  .loc-type-btn { flex:1; padding:0.45rem; border:1px solid var(--border); border-radius:var(--radius); background:transparent; color:var(--text-muted); font-size:0.82rem; cursor:pointer; transition:all var(--transition); }
+  .loc-type-btn.active { border-color:var(--gold); color:var(--gold); background:var(--gold-subtle); }
+
+  /* ── Light Theme ─────────────────────────────────────────── */
+  :root[data-theme="light"] {
+    --bg:           #f5f3ee;
+    --surface:      #ffffff;
+    --surface-2:    #f0ece3;
+    --gold:         #9a6f28;
+    --gold-dim:     #7a5820;
+    --gold-subtle:  rgba(154,111,40,0.08);
+    --text:         #1a1a1a;
+    --text-muted:   #6b6355;
+    --border:       rgba(154,111,40,0.25);
+    --border-hover: rgba(154,111,40,0.55);
+    --danger:       #c0392b;
+    --danger-dim:   rgba(192,57,43,0.12);
+  }
+  :root[data-theme="light"] .app-header {
+    background: rgba(245,243,238,0.95);
+  }
+
+  /* ── Theme Toggle Buttons ────────────────────────────────── */
+  .theme-toggle-group { display:flex; gap:0.4rem; }
+  .theme-btn {
+    background: transparent; border:1px solid var(--border);
+    color:var(--text-muted); border-radius:var(--radius);
+    padding:0.3rem 0.75rem; font-size:0.8rem; cursor:pointer;
+    transition:all var(--transition);
+  }
+  .theme-btn.active { background:var(--gold-subtle); border-color:var(--gold); color:var(--gold); }
+  .theme-btn:hover:not(.active) { border-color:var(--border-hover); color:var(--text); }
+
+  </style>
+</head>
+<body>
+
+  <header class="app-header">
+    <h1 class="app-title">Road Visits</h1>
+    <div class="header-divider"></div>
+    <nav id="breadcrumb" class="breadcrumb" aria-label="Navigation"></nav>
+    <input type="search" id="global-search" class="header-search" placeholder="Search...">
+    <div class="view-toggle-group" id="view-toggle-group">
+      <button id="btn-view-grid" class="vtbtn active" title="Grid view">⊞</button>
+      <button id="btn-view-list" class="vtbtn" title="List view">≡</button>
+    </div>
+    <button id="btn-theme-toggle" class="settings-btn" title="Toggle theme" style="font-size:1rem;">🌙</button>
+    <button id="btn-settings" class="settings-btn" title="Settings">&#9881;</button>
+    <div class="user-pill">
+      <span id="user-email" class="user-email"></span>
+      <button id="btn-signout" class="signout-btn" title="Sign out">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- VIEW: Place Hierarchy -->
+    <section id="view-places">
+      <div id="places-view-header" class="view-header"></div>
+      <div id="places-container"></div>
+    </section>
+
+    <!-- VIEW: Roads in a Postcode -->
+    <section id="view-roads" class="hidden">
+      <div id="roads-view-header" class="view-header"></div>
+      <div id="import-feedback" class="import-feedback hidden"></div>
+      <input type="file" id="csv-file-input" accept=".csv" class="hidden">
+      <div id="roads-container"></div>
+    </section>
+
+    <!-- VIEW: Address Number Grid -->
+    <section id="view-addresses" class="hidden">
+      <div id="addresses-view-header" class="view-header"></div>
+      <div id="number-grid-container"></div>
+    </section>
+  </main>
+
+  <!-- VIEW: Find Your Location (shown when user has no location) -->
+  <div id="view-find-location" class="hidden find-location-screen">
+    <div class="find-location-card">
+      <h2 class="find-location-title">Welcome! Find your location</h2>
+      <p class="find-location-sub">Search for your mosque or organisation to request access, or create your own private workspace.</p>
+      <div class="osm-search-row" style="margin-bottom:0.75rem">
+        <input type="text" id="join-search-input" class="modal-input" placeholder="e.g. Al-Noor Mosque London" />
+        <button id="join-search-btn" class="btn btn-ghost">Search</button>
+      </div>
+      <div id="join-results" class="osm-results"></div>
+      <div id="join-requests-list"></div>
+      <div style="text-align:center;margin-top:1rem">
+        <button id="btn-create-own" class="btn btn-ghost btn-sm">or create my own private workspace →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet Map Modal -->
+  <div id="map-modal" class="map-modal-overlay hidden">
+    <div class="map-modal-box">
+      <div class="map-modal-header">
+        <h3>📍 Set Road Location — click on the map to pin</h3>
+        <button id="map-modal-close" class="icon-btn">✕</button>
+      </div>
+      <div id="leaflet-map"></div>
+      <div class="map-modal-footer">
+        <span id="map-coords" class="map-coords">Click the map to pin a location</span>
+        <button id="map-gps-btn" class="btn btn-ghost btn-sm">📍 Use My GPS</button>
+        <button id="map-clear-btn" class="btn btn-ghost btn-sm">Clear</button>
+        <button id="map-save-btn" class="btn btn-primary btn-sm">Save Location</button>
+      </div>
+      <div id="map-hierarchy" style="padding:0.4rem 1.1rem 0.6rem;font-size:0.75rem;color:var(--gold-dim);min-height:1.4rem;"></div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay hidden" id="modal-overlay" role="dialog" aria-modal="true">
+    <div class="modal-box" id="modal-box">
+      <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script>
+  // Apply saved theme immediately (before render to avoid flash)
+  (function() {
+    const t = localStorage.getItem('rvt_theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  }());
+
+  (function () {
+    'use strict';
+
+    const DEFAULT_OUTCOMES = ['No Answer','Left Leaflet','Interested','Not Interested','Called Back','Moved Away','Revisit Needed','Declined'];
+
+    /* ── Constants ────────────────────────────────────────── */
+    // Root shows Locations directly. Country/City/Town are labels on locations, not nav layers.
+    const CHILD_TYPE  = { root:'location' };
+    const TYPE_LABEL  = { location:'Location' };
+    const TYPE_PLURAL = { location:'Locations' };
+
+    /* ── In-Memory Cache (populated by initCache in module script) ── */
+    const _cache = {
+      places: [], roads: [], addresses: [], visits: [],
+      tags: {},          // locationId → tag[]
+      outcomes: null,    // null = use DEFAULT_OUTCOMES
+      settings: { currentUser: '' },
+    };
+
+    /* ── Cache Reads (synchronous — same interface as before) ── */
+    function loadPlaces()    { return _cache.places; }
+    function loadRoads()     { return _cache.roads; }
+    function loadAddresses() { return _cache.addresses; }
+    function loadVisits()    { return _cache.visits; }
+    function loadOutcomes()  { return _cache.outcomes || DEFAULT_OUTCOMES.slice(); }
+    function loadSettings()  { return _cache.settings; }
+    function loadTags(lid)   { return _cache.tags[lid || 'ungrouped'] || []; }
+
+    /* ── Cache Writes (update cache; Supabase writes fired separately) ── */
+    function savePlaces(d)    { _cache.places = d; }
+    function saveRoads(d)     { _cache.roads = d; }
+    function saveAddresses(d) { _cache.addresses = d; }
+    function saveVisits(d)    { _cache.visits = d; }
+    function saveTags(lid, d) { _cache.tags[lid || 'ungrouped'] = d; }
+    function saveOutcomes(d)  { _cache.outcomes = d; _syncPreferences({ outcomes: d }); }
+    function saveSettings(d)  { _cache.settings = d; if (d.currentUser) _syncProfileName(d.currentUser); }
+
+    /* ── UID — real UUIDv4 so IDs are valid for Supabase ────── */
+    function uid() {
+      return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+    }
+
+    /* ── Toast notification ──────────────────────────────────── */
+    function _showToast(msg, isError) {
+      const t = document.createElement('div');
+      t.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);padding:0.65rem 1.4rem;border-radius:10px;font-size:0.88rem;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.5);pointer-events:none;';
+      t.style.background = isError ? '#c0392b' : 'var(--gold)';
+      t.style.color = isError ? '#fff' : '#0a0a0a';
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 4000);
+    }
+
+    /* ── Supabase sync helpers (fire-and-forget, toast on error) ─ */
+    async function _syncWrite(fn) {
+      try { await fn(); }
+      catch(e) { console.error('Sync error:', e); _showToast('Could not save: ' + (e.message || 'unknown error'), true); }
+    }
+
+    function _syncCreatePlace(p) {
+      if (!window._rvtDb || !window._rvtUserId) return;
+      _syncWrite(() => window._rvtDb.from('places').insert({
+        id: p.id, type: 'location', name: p.name,
+        location_type: p.locationType || null, location_type_label: p.locationTypeLabel || null,
+        country: p.country || null, city: p.city || null, town: p.town || null,
+        lat: p.lat || null, lng: p.lng || null,
+        osm_place_id: p.osmPlaceId || null, address: p.address || null,
+        owner_id: window._rvtUserId, created_by: window._rvtUserId,
+      }).then(r => { if (r.error) throw r.error; }));
+    }
+    function _syncUpdatePlace(id, updates) {
+      if (!window._rvtDb) return;
+      _syncWrite(() => window._rvtDb.from('places').update(updates).eq('id', id).then(r => { if (r.error) throw r.error; }));
+    }
+    function _syncDeletePlace(id) {
+      if (!window._rvtDb) return;
+      // Use RPC for cascade soft-delete (handles roads/addresses/visits)
+      _syncWrite(() => window._rvtDb.rpc('fn_soft_delete_place', { p_place_id: id }).then(r => { if (r.error) throw r.error; }));
+    }
+
+    function _syncCreateRoad(r) {
+      if (!window._rvtDb || !window._rvtUserId) return;
+      _syncWrite(() => window._rvtDb.from('roads').insert({
+        id: r.id, name: r.name, postcode: r.postcode || null,
+        location_id: r.locationId || null,
+        lat: r.lat || null, lng: r.lng || null,
+        country: r.country || null, city: r.city || null, town: r.town || null,
+        owner_id: window._rvtUserId, created_by: window._rvtUserId,
+      }).then(res => { if (res.error) throw res.error; }));
+    }
+    function _syncUpdateRoad(id, updates) {
+      if (!window._rvtDb) return;
+      _syncWrite(() => window._rvtDb.from('roads').update(updates).eq('id', id).then(r => { if (r.error) throw r.error; }));
+    }
+    function _syncDeleteRoad(id) {
+      if (!window._rvtDb) return;
+      const now = new Date().toISOString();
+      _syncWrite(async () => {
+        const { error: re } = await window._rvtDb.from('roads').update({ deleted_at: now }).eq('id', id);
+        if (re) throw re;
+        await window._rvtDb.from('addresses').update({ deleted_at: now }).eq('road_id', id);
+      });
+    }
+
+    function _syncCreateAddress(a) {
+      if (!window._rvtDb || !window._rvtUserId) return;
+      _syncWrite(() => window._rvtDb.from('addresses').insert({
+        id: a.id, road_id: a.roadId, address: a.address,
+        owner_id: window._rvtUserId, created_by: window._rvtUserId,
+      }).then(r => { if (r.error) throw r.error; }));
+    }
+    function _syncDeleteAddress(id) {
+      if (!window._rvtDb) return;
+      const now = new Date().toISOString();
+      _syncWrite(async () => {
+        const { error: ae } = await window._rvtDb.from('addresses').update({ deleted_at: now }).eq('id', id);
+        if (ae) throw ae;
+        await window._rvtDb.from('visits').update({ deleted_at: now }).eq('address_id', id);
+      });
+    }
+
+    function _syncCreateVisit(v) {
+      if (!window._rvtDb || !window._rvtUserId) return;
+      _syncWrite(() => window._rvtDb.from('visits').insert({
+        id: v.id, address_id: v.addressId, outcome: v.outcome,
+        visited_at: v.timestamp, entered_by_name: v.enteredBy || null,
+        entered_by_user_id: window._rvtUserId,
+      }).then(r => { if (r.error) throw r.error; }));
+    }
+
+    function _syncCreateTag(tag, locationId) {
+      if (!window._rvtDb || !window._rvtUserId) return;
+      _syncWrite(() => window._rvtDb.from('road_tags').insert({
+        id: tag.id, location_id: locationId, name: tag.name, color: tag.color,
+        owner_id: window._rvtUserId,
+      }).then(r => { if (r.error) throw r.error; }));
+    }
+    function _syncDeleteTag(id) {
+      if (!window._rvtDb) return;
+      _syncWrite(() => window._rvtDb.from('road_tags').update({ deleted_at: new Date().toISOString() }).eq('id', id).then(r => { if (r.error) throw r.error; }));
+    }
+    function _syncTagAssignments(roadId, tagIds) {
+      if (!window._rvtDb) return;
+      _syncWrite(async () => {
+        const { error: de } = await window._rvtDb.from('road_tag_assignments').delete().eq('road_id', roadId);
+        if (de) throw de;
+        if (tagIds.length) {
+          const { error: ie } = await window._rvtDb.from('road_tag_assignments').insert(tagIds.map(tid => ({ road_id: roadId, tag_id: tid })));
+          if (ie) throw ie;
+        }
+      });
+    }
+
+    function _syncPreferences(partial) {
+      if (!window._rvtDb || !window._rvtUserId) return;
+      _syncWrite(async () => {
+        const { data: cur } = await window._rvtDb.from('profiles').select('preferences').eq('id', window._rvtUserId).single();
+        const merged = { ...(cur?.preferences || {}), ...partial };
+        const { error } = await window._rvtDb.from('profiles').update({ preferences: merged, updated_at: new Date().toISOString() }).eq('id', window._rvtUserId);
+        if (error) throw error;
+      });
+    }
+    function _syncProfileName(name) {
+      if (!window._rvtDb || !window._rvtUserId) return;
+      _syncWrite(() => window._rvtDb.from('profiles').update({ full_name: name, updated_at: new Date().toISOString() }).eq('id', window._rvtUserId).then(r => { if (r.error) throw r.error; }));
+    }
+
+    /* ── State ────────────────────────────────────────────── */
+    const state = {
+      view:             'places',   // 'places' | 'roads' | 'addresses'
+      placeStack:       [],         // [{id, type, name}] — breadcrumb trail
+      currentPlaceId:   null,       // place whose children we show (null = root)
+      currentLocationId:null,        // location id for roads view ('__ungrouped__' for ungrouped)
+      currentRoadId:    null,
+      viewMode:         'grid',     // 'grid' | 'list'
+      roadSort:         'last_visited_desc', // 'last_visited_desc'|'last_visited_asc'|'name_asc'
+      search:           '',
+    };
+
+    /* ── Navigation ───────────────────────────────────────── */
+    function clearSearch() {
+      state.search = '';
+      document.getElementById('global-search').value = '';
+    }
+
+    function navigateToRoot() {
+      state.placeStack = []; state.currentPlaceId = null;
+      state.view = 'places'; clearSearch(); render();
+    }
+
+    function navigateIntoPlace(place) {
+      state.placeStack.push({ id:place.id, type:place.type, name:place.name });
+      clearSearch();
+      if (place.type === 'location') {
+        state.view = 'roads'; state.currentLocationId = place.id;
+      } else {
+        state.view = 'places'; state.currentPlaceId = place.id;
+      }
+      render();
+    }
+
+    function navigateToUngrouped() {
+      state.placeStack.push({ id:'__ungrouped__', type:'ungrouped', name:'Ungrouped Roads' });
+      state.currentLocationId = '__ungrouped__';
+      state.view = 'roads'; clearSearch(); render();
+    }
+
+    function navigateIntoRoad(road) {
+      state.placeStack.push({ id:road.id, type:'road', name:road.name });
+      state.currentRoadId = road.id;
+      state.view = 'addresses'; clearSearch(); render();
+    }
+
+    function navigateBackTo(idx) {
+      // idx = -1 means root
+      if (idx < 0) { navigateToRoot(); return; }
+      const target = state.placeStack[idx];
+      state.placeStack = state.placeStack.slice(0, idx + 1);
+      clearSearch();
+      if (target.type === 'road') {
+        state.view = 'addresses'; state.currentRoadId = target.id;
+      } else if (target.type === 'location') {
+        state.view = 'roads'; state.currentLocationId = target.id;
+      } else if (target.type === 'ungrouped') {
+        state.view = 'roads'; state.currentLocationId = '__ungrouped__';
+      } else {
+        state.view = 'places'; state.currentPlaceId = target.id;
+      }
+      render();
+    }
+
+    /* ── Breadcrumb ───────────────────────────────────────── */
+    function updateBreadcrumb() {
+      const bc = document.getElementById('breadcrumb');
+      bc.innerHTML = '';
+
+      const homeEl = document.createElement('span');
+      homeEl.className = 'bc-item' + (state.placeStack.length ? ' link' : '');
+      homeEl.textContent = 'Home';
+      if (state.placeStack.length) homeEl.addEventListener('click', () => navigateBackTo(-1));
+      bc.appendChild(homeEl);
+
+      state.placeStack.forEach((item, i) => {
+        const sep = document.createElement('span');
+        sep.className = 'bc-sep'; sep.textContent = '/';
+        bc.appendChild(sep);
+        const el = document.createElement('span');
+        const isLast = i === state.placeStack.length - 1;
+        el.className = 'bc-item' + (isLast ? '' : ' link');
+        el.textContent = item.name;
+        if (!isLast) el.addEventListener('click', () => navigateBackTo(i));
+        bc.appendChild(el);
+      });
+
+      // Show/hide search and toggle for addresses view
+      const searchEl = document.getElementById('global-search');
+      const toggleEl = document.getElementById('view-toggle-group');
+      if (state.view === 'addresses') {
+        searchEl.classList.add('hidden');
+        toggleEl.classList.add('hidden');
+      } else {
+        searchEl.classList.remove('hidden');
+        toggleEl.classList.remove('hidden');
+      }
+    }
+
+    /* ── Helpers ──────────────────────────────────────────── */
+    function formatDate(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        return d.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}) + ' at ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+      } catch(e) { return ''; }
+    }
+    function toDatetimeLocal(date) {
+      const d = date || new Date();
+      const p = n => String(n).padStart(2,'0');
+      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    function getLastVisit(addressId) {
+      const v = loadVisits().filter(v => v.addressId === addressId);
+      return v.length ? v.sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp))[0] : null;
+    }
+    function getLastVisitForRoad(roadId) {
+      const addrIds = new Set(loadAddresses().filter(a => a.roadId === roadId).map(a => a.id));
+      if (!addrIds.size) return null;
+      const visits = loadVisits().filter(v => addrIds.has(v.addressId));
+      if (!visits.length) return null;
+      return visits.sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp))[0];
+    }
+    function formatDateShort(iso) {
+      if (!iso) return '';
+      try { return new Date(iso).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}); }
+      catch(e) { return ''; }
+    }
+    function parseAddressNumber(addr) {
+      const m = String(addr).match(/\d+/); return m ? parseInt(m[0],10) : null;
+    }
+    function getPlaceChildCount(placeId) {
+      // count places children + roads if postcode
+      const p = loadPlaces().find(x => x.id === placeId);
+      if (!p) return 0;
+      if (p.type === 'location') return loadRoads().filter(r => r.locationId === placeId).length;
+      return loadPlaces().filter(x => x.parentId === placeId).length;
+    }
+    function childLabel(placeType) {
+      return placeType === 'location' ? 'Roads' : 'Locations';
+    }
+    function getAllDescendantPlaceIds(placeId) {
+      const all = loadPlaces();
+      const result = [], queue = [placeId];
+      while (queue.length) {
+        const pid = queue.shift();
+        all.filter(p => p.parentId === pid).forEach(c => { result.push(c.id); queue.push(c.id); });
+      }
+      return result;
+    }
+
+    /* ── Delete Place (cascade) ───────────────────────────── */
+    function deletePlace(placeId) {
+      const place = loadPlaces().find(p => p.id === placeId);
+      openConfirm({
+        message: `Delete "${place ? place.name : 'this item'}"? All nested items, roads, addresses, and visit history inside it will be permanently removed.`,
+        confirmLabel: 'Delete',
+        onConfirm() {
+          const descIds = getAllDescendantPlaceIds(placeId);
+          const allPlaceIds = new Set([placeId, ...descIds]);
+          const affRoads = loadRoads().filter(r => allPlaceIds.has(r.locationId));
+          const affRoadIds = new Set(affRoads.map(r => r.id));
+          const affAddrs = loadAddresses().filter(a => affRoadIds.has(a.roadId));
+          const affAddrIds = new Set(affAddrs.map(a => a.id));
+          savePlaces(loadPlaces().filter(p => !allPlaceIds.has(p.id)));
+          saveRoads(loadRoads().filter(r => !affRoadIds.has(r.id)));
+          saveAddresses(loadAddresses().filter(a => !affAddrIds.has(a.roadId)));
+          saveVisits(loadVisits().filter(v => !affAddrIds.has(v.addressId)));
+          // DB cascade: RPC soft-deletes the place + all nested data in one transaction
+          _syncDeletePlace(placeId);
+          // If we were inside this place, go up
+          if (state.placeStack.some(s => s.id === placeId)) navigateToRoot();
+          else render();
+        }
+      });
+    }
+
+    /* ── Delete Road ──────────────────────────────────────── */
+    function deleteRoad(roadId) {
+      const road = loadRoads().find(r => r.id === roadId);
+      openConfirm({
+        message: `Delete "${road ? road.name : 'this road'}"? All addresses and visit history will also be removed.`,
+        confirmLabel: 'Delete Road',
+        onConfirm() {
+          const addrs = loadAddresses().filter(a => a.roadId === roadId);
+          const addrIds = new Set(addrs.map(a => a.id));
+          saveRoads(loadRoads().filter(r => r.id !== roadId));
+          saveAddresses(loadAddresses().filter(a => a.roadId !== roadId));
+          saveVisits(loadVisits().filter(v => !addrIds.has(v.addressId)));
+          _syncDeleteRoad(roadId);
+          if (state.currentRoadId === roadId) navigateBackTo(state.placeStack.length - 2);
+          else render();
+        }
+      });
+    }
+
+    /* ── Create Place Card ────────────────────────────────── */
+    function createPlaceCard(place) {
+      const count = getPlaceChildCount(place.id);
+      const card = document.createElement('div');
+      card.className = 'item-card';
+
+      const top = document.createElement('div');
+      top.className = 'card-top';
+      const nameWrap = document.createElement('div');
+      const badge = document.createElement('div');
+      badge.className = 'type-badge';
+      badge.textContent = TYPE_LABEL[place.type] || place.type;
+      const nameEl = document.createElement('div');
+      nameEl.className = 'card-name';
+      nameEl.textContent = place.name;
+      nameWrap.appendChild(badge);
+      nameWrap.appendChild(nameEl);
+
+      const acts = document.createElement('div');
+      acts.className = 'card-actions';
+      if (place.type === 'location') {
+        const shareBtn = document.createElement('button');
+        shareBtn.className = 'icon-btn'; shareBtn.title = 'Invite / Manage Members'; shareBtn.textContent = '👥';
+        shareBtn.addEventListener('click', e => { e.stopPropagation(); openMembersModal(place.id); });
+        acts.appendChild(shareBtn);
+      }
+      const editBtn = document.createElement('button');
+      editBtn.className = 'icon-btn'; editBtn.title = 'Edit'; editBtn.textContent = '✏';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); openEditPlaceModal(place.id); });
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn del'; delBtn.title = 'Delete'; delBtn.textContent = '🗑';
+      delBtn.addEventListener('click', e => { e.stopPropagation(); deletePlace(place.id); });
+      acts.appendChild(editBtn); acts.appendChild(delBtn);
+
+      top.appendChild(nameWrap); top.appendChild(acts);
+
+      const sub = document.createElement('div');
+      sub.className = 'card-sub';
+
+      if (place.type === 'location') {
+        // Show location type label
+        const typeLabel = place.locationType === 'mosque' ? '🕌 Mosque'
+          : place.locationType === 'individual' ? '👤 Individual'
+          : (place.locationTypeLabel || '📍 Location');
+        sub.textContent = typeLabel;
+        // Show country · city · town hierarchy
+        const hier = [place.country, place.city, place.town].filter(Boolean).join(' · ');
+        if (hier) {
+          const hierEl = document.createElement('div');
+          hierEl.className = 'card-sub';
+          hierEl.style.fontSize = '0.7rem';
+          hierEl.style.color = 'var(--gold-dim)';
+          hierEl.textContent = hier;
+          card.appendChild(top); card.appendChild(sub); card.appendChild(hierEl);
+          card.addEventListener('click', () => navigateIntoPlace(place));
+          return card;
+        }
+      } else {
+        sub.textContent = count + ' ' + (TYPE_PLURAL['location'] || 'Locations').toLowerCase();
+      }
+
+      card.appendChild(top); card.appendChild(sub);
+      card.addEventListener('click', () => navigateIntoPlace(place));
+      return card;
+    }
+
+    /* ── Create Place List Item ───────────────────────────── */
+    function createPlaceListItem(place) {
+      const count = getPlaceChildCount(place.id);
+      const item = document.createElement('div');
+      item.className = 'list-item';
+
+      const badge = document.createElement('div');
+      badge.className = 'type-badge list-badge';
+      badge.textContent = TYPE_LABEL[place.type] || place.type;
+
+      const name = document.createElement('div');
+      name.className = 'list-name';
+      name.textContent = place.name;
+
+      const sub = document.createElement('div');
+      sub.className = 'list-sub';
+      const hier = place.type === 'location'
+        ? [place.country, place.city, place.town].filter(Boolean).join(' · ')
+        : count + ' ' + (TYPE_PLURAL['location'] || 'locations').toLowerCase();
+      sub.textContent = hier || (count + ' roads');
+
+      const acts = document.createElement('div');
+      acts.className = 'list-actions';
+      if (place.type === 'location') {
+        const shareBtn = document.createElement('button');
+        shareBtn.className = 'icon-btn'; shareBtn.title = 'Invite / Manage Members'; shareBtn.textContent = '👥';
+        shareBtn.addEventListener('click', e => { e.stopPropagation(); openMembersModal(place.id); });
+        acts.appendChild(shareBtn);
+      }
+      const editBtn = document.createElement('button');
+      editBtn.className = 'icon-btn'; editBtn.title = 'Edit'; editBtn.textContent = '✏';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); openEditPlaceModal(place.id); });
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn del'; delBtn.title = 'Delete'; delBtn.textContent = '🗑';
+      delBtn.addEventListener('click', e => { e.stopPropagation(); deletePlace(place.id); });
+      acts.appendChild(editBtn); acts.appendChild(delBtn);
+
+      item.appendChild(badge); item.appendChild(name); item.appendChild(sub); item.appendChild(acts);
+      item.addEventListener('click', () => navigateIntoPlace(place));
+      return item;
+    }
+
+    /* ── Create Road Card ─────────────────────────────────── */
+    function createRoadCard(road) {
+      const addrCount = loadAddresses().filter(a => a.roadId === road.id).length;
+      const lv = getLastVisitForRoad(road.id);
+      const tags = loadTags(road.locationId);
+      const roadTags = (road.tags || []).map(tid => tags.find(t => t.id === tid)).filter(Boolean);
+
+      const card = document.createElement('div');
+      card.className = 'item-card';
+
+      const top = document.createElement('div');
+      top.className = 'card-top';
+      const nameWrap = document.createElement('div');
+      nameWrap.style.flex = '1';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'card-name'; nameEl.textContent = road.name;
+      nameWrap.appendChild(nameEl);
+      if (road.postcode) {
+        const pc = document.createElement('div');
+        pc.className = 'card-postcode'; pc.textContent = road.postcode;
+        nameWrap.appendChild(pc);
+      }
+
+      const acts = document.createElement('div');
+      acts.className = 'card-actions';
+      const mapBtn = document.createElement('button');
+      mapBtn.className = 'icon-btn'; mapBtn.title = road.lat ? 'Location set — click to change' : 'Set location on map';
+      mapBtn.textContent = road.lat ? '📍' : '🗺';
+      mapBtn.style.opacity = road.lat ? '1' : '0.45';
+      mapBtn.addEventListener('click', e => { e.stopPropagation(); openMapModal(road.id); });
+      // Tag button — only show if location has tags defined
+      if (tags.length) {
+        const tagBtn = document.createElement('button');
+        tagBtn.className = 'icon-btn'; tagBtn.title = 'Assign tags'; tagBtn.textContent = '🏷';
+        tagBtn.style.opacity = roadTags.length ? '1' : '0.75';
+        tagBtn.addEventListener('click', e => { e.stopPropagation(); openTagAssignModal(road.id); });
+        acts.appendChild(tagBtn);
+      }
+      const editBtn = document.createElement('button');
+      editBtn.className = 'icon-btn'; editBtn.title = 'Edit'; editBtn.textContent = '✏';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); openEditRoadModal(road.id); });
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn del'; delBtn.title = 'Delete'; delBtn.textContent = '🗑';
+      delBtn.addEventListener('click', e => { e.stopPropagation(); deleteRoad(road.id); });
+      acts.appendChild(mapBtn); acts.appendChild(editBtn); acts.appendChild(delBtn);
+
+      top.appendChild(nameWrap); top.appendChild(acts);
+
+      const sub = document.createElement('div');
+      sub.className = 'card-sub';
+      const locHier = road.lat ? [road.country, road.city, road.town].filter(Boolean).join(' · ') : '';
+      sub.textContent = (addrCount === 1 ? '1 address' : addrCount + ' addresses')
+        + (locHier ? ' · 📍 ' + locHier : (road.lat ? ' · 📍 location set' : ''));
+
+      const lvEl = document.createElement('div');
+      lvEl.className = 'road-last-visit' + (lv ? ' has-visit' : '');
+      lvEl.textContent = lv ? '🕐 Last visited ' + formatDateShort(lv.timestamp) : 'No visits yet';
+
+      card.appendChild(top); card.appendChild(sub); card.appendChild(lvEl);
+
+      if (roadTags.length) {
+        const tagsRow = document.createElement('div');
+        tagsRow.className = 'road-tags';
+        roadTags.forEach(tag => {
+          const chip = document.createElement('span');
+          chip.className = 'road-tag-chip';
+          chip.textContent = tag.name;
+          chip.style.cssText = `background:${tag.color}22;border:1px solid ${tag.color}88;color:${tag.color};`;
+          tagsRow.appendChild(chip);
+        });
+        card.appendChild(tagsRow);
+      }
+
+      card.addEventListener('click', () => navigateIntoRoad(road));
+      return card;
+    }
+
+    /* ── Create Road List Item ────────────────────────────── */
+    function createRoadListItem(road) {
+      const addrCount = loadAddresses().filter(a => a.roadId === road.id).length;
+      const lv = getLastVisitForRoad(road.id);
+      const tags = loadTags(road.locationId);
+      const roadTags = (road.tags || []).map(tid => tags.find(t => t.id === tid)).filter(Boolean);
+
+      const item = document.createElement('div');
+      item.className = 'list-item'; item.style.flexWrap = 'wrap';
+
+      const name = document.createElement('div');
+      name.className = 'list-name'; name.textContent = road.name;
+      if (road.postcode) {
+        const pc = document.createElement('div');
+        pc.className = 'list-postcode'; pc.textContent = road.postcode;
+        item.appendChild(name); item.appendChild(pc);
+      } else {
+        item.appendChild(name);
+      }
+
+      const sub = document.createElement('div');
+      sub.className = 'list-sub';
+      sub.textContent = (addrCount === 1 ? '1 address' : addrCount + ' addresses')
+        + ' · ' + (lv ? '🕐 ' + formatDateShort(lv.timestamp) : 'No visits');
+
+      if (roadTags.length) {
+        const tagsRow = document.createElement('div');
+        tagsRow.className = 'road-tags'; tagsRow.style.width = '100%';
+        roadTags.forEach(tag => {
+          const chip = document.createElement('span');
+          chip.className = 'road-tag-chip';
+          chip.textContent = tag.name;
+          chip.style.cssText = `background:${tag.color}22;border:1px solid ${tag.color}88;color:${tag.color};`;
+          tagsRow.appendChild(chip);
+        });
+        item.appendChild(tagsRow);
+      }
+
+      const acts = document.createElement('div');
+      acts.className = 'list-actions';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'icon-btn'; editBtn.title = 'Edit'; editBtn.textContent = '✏';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); openEditRoadModal(road.id); });
+      const delBtn = document.createElement('button');
+      delBtn.className = 'icon-btn del'; delBtn.title = 'Delete'; delBtn.textContent = '🗑';
+      delBtn.addEventListener('click', e => { e.stopPropagation(); deleteRoad(road.id); });
+      acts.appendChild(editBtn); acts.appendChild(delBtn);
+
+      item.appendChild(sub); item.appendChild(acts);
+      item.addEventListener('click', () => navigateIntoRoad(road));
+      return item;
+    }
+
+    /* ── Render Places ────────────────────────────────────── */
+    function renderPlaces() {
+      // Root always shows all locations. Country/City/Town are label attributes, not nav layers.
+      const hdr = document.getElementById('places-view-header');
+      hdr.innerHTML = '';
+      const titleDiv = document.createElement('div');
+      const titleEl = document.createElement('h2');
+      titleEl.className = 'view-title';
+      titleEl.textContent = 'Your Locations';
+      titleDiv.appendChild(titleEl);
+      hdr.appendChild(titleDiv);
+
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn btn-primary';
+      addBtn.textContent = '+ Add Location';
+      addBtn.addEventListener('click', () => openNewPlaceModal(null, 'location'));
+      hdr.appendChild(addBtn);
+
+      // Get all locations
+      let items = loadPlaces().filter(p => p.type === 'location');
+      if (state.search) items = items.filter(p => p.name.toLowerCase().includes(state.search));
+      items.sort((a,b) => a.name.localeCompare(b.name));
+
+      const container = document.getElementById('places-container');
+      container.innerHTML = '';
+
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        if (state.search) {
+          empty.textContent = 'No results for "' + state.search + '".';
+        } else {
+          empty.innerHTML = '<div>No locations yet.</div><div class="empty-state-hint">Click "+ Add Location" or use the search below to find and join one.</div>';
+        }
+        container.appendChild(empty);
+      } else {
+        const grid = document.createElement('div');
+        grid.className = state.viewMode === 'grid' ? 'card-grid' : 'list-view';
+        items.forEach(p => grid.appendChild(state.viewMode === 'grid' ? createPlaceCard(p) : createPlaceListItem(p)));
+        container.appendChild(grid);
+      }
+
+      // Ungrouped roads at root only
+      if (!state.currentPlaceId && !state.search) {
+        const ungrouped = loadRoads().filter(r => !r.locationId);
+        if (ungrouped.length) {
+          const sep = document.createElement('div');
+          sep.className = 'section-sep'; sep.textContent = 'Ungrouped Roads';
+          container.appendChild(sep);
+          const ugGrid = document.createElement('div');
+          ugGrid.className = state.viewMode === 'grid' ? 'card-grid' : 'list-view';
+          const ugCard = state.viewMode === 'grid'
+            ? createUngroupedCard(ungrouped.length)
+            : createUngroupedListItem(ungrouped.length);
+          ugGrid.appendChild(ugCard);
+          container.appendChild(ugGrid);
+        }
+      }
+    }
+
+    function createUngroupedCard(count) {
+      const card = document.createElement('div');
+      card.className = 'item-card';
+      const badge = document.createElement('div');
+      badge.className = 'type-badge'; badge.textContent = 'Roads';
+      const name = document.createElement('div');
+      name.className = 'card-name'; name.textContent = 'Ungrouped Roads';
+      const sub = document.createElement('div');
+      sub.className = 'card-sub'; sub.textContent = count + ' road' + (count !== 1 ? 's' : '') + ' not yet assigned to a postcode';
+      card.appendChild(badge); card.appendChild(name); card.appendChild(sub);
+      card.addEventListener('click', navigateToUngrouped);
+      return card;
+    }
+
+    function createUngroupedListItem(count) {
+      const item = document.createElement('div');
+      item.className = 'list-item';
+      const badge = document.createElement('div');
+      badge.className = 'type-badge list-badge'; badge.textContent = 'Roads';
+      const name = document.createElement('div');
+      name.className = 'list-name'; name.textContent = 'Ungrouped Roads';
+      const sub = document.createElement('div');
+      sub.className = 'list-sub'; sub.textContent = count + ' road' + (count !== 1 ? 's' : '');
+      item.appendChild(badge); item.appendChild(name); item.appendChild(sub);
+      item.addEventListener('click', navigateToUngrouped);
+      return item;
+    }
+
+    /* ── Render Roads ─────────────────────────────────────── */
+    function renderRoads() {
+      const locationId = state.currentLocationId;
+      const isUngrouped = locationId === '__ungrouped__';
+      const location = isUngrouped ? null : loadPlaces().find(p => p.id === locationId);
+
+      // Header
+      const hdr = document.getElementById('roads-view-header');
+      hdr.innerHTML = '';
+      const titleEl = document.createElement('h2');
+      titleEl.className = 'view-title';
+      titleEl.textContent = isUngrouped ? 'Ungrouped Roads' : 'Roads' + (location ? ' in ' + location.name : '');
+      const acts = document.createElement('div');
+      acts.className = 'view-actions';
+
+      // Members + join request buttons for all non-ungrouped locations
+      if (!isUngrouped && location) {
+        const membersBtn = document.createElement('button');
+        membersBtn.className = 'btn btn-ghost btn-sm';
+        membersBtn.textContent = '👥 Members';
+        membersBtn.addEventListener('click', () => openMembersModal(locationId));
+        acts.appendChild(membersBtn);
+
+        const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
+          .filter(r => r.locationId === locationId && r.status === 'pending');
+        if (reqs.length) {
+          const reqsBtn = document.createElement('button');
+          reqsBtn.className = 'btn btn-ghost btn-sm';
+          reqsBtn.textContent = '📋 Requests (' + reqs.length + ')';
+          reqsBtn.addEventListener('click', () => openJoinRequestsModal(locationId));
+          acts.appendChild(reqsBtn);
+        }
+      }
+
+      // Sort toggle
+      const sortLabels = {'last_visited_desc':'↓ Last Visit','last_visited_asc':'↑ Last Visit','name_asc':'A–Z'};
+      const sortBtn = document.createElement('button');
+      sortBtn.className = 'btn btn-ghost btn-sm';
+      sortBtn.textContent = sortLabels[state.roadSort] || '↓ Last Visit';
+      sortBtn.title = 'Toggle sort order';
+      sortBtn.addEventListener('click', () => {
+        const cycle = {'last_visited_desc':'last_visited_asc','last_visited_asc':'name_asc','name_asc':'last_visited_desc'};
+        state.roadSort = cycle[state.roadSort] || 'last_visited_desc';
+        render();
+      });
+      acts.appendChild(sortBtn);
+
+      // Tags button (non-ungrouped only)
+      if (!isUngrouped) {
+        const tagsBtn = document.createElement('button');
+        tagsBtn.className = 'btn btn-ghost btn-sm';
+        tagsBtn.textContent = '🏷 Tags';
+        tagsBtn.addEventListener('click', () => openManageTagsModal(locationId));
+        acts.appendChild(tagsBtn);
+      }
+
+      const dlBtn = document.createElement('button');
+      dlBtn.className = 'btn btn-ghost btn-sm'; dlBtn.textContent = 'Download Template';
+      dlBtn.addEventListener('click', downloadTemplate);
+      const impBtn = document.createElement('button');
+      impBtn.className = 'btn btn-ghost btn-sm'; impBtn.textContent = 'Import CSV';
+      impBtn.addEventListener('click', () => { document.getElementById('csv-file-input').value = ''; document.getElementById('csv-file-input').click(); });
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn btn-primary'; addBtn.textContent = '+ Add Road';
+      addBtn.addEventListener('click', () => openNewRoadModal(isUngrouped ? null : locationId));
+      acts.appendChild(dlBtn); acts.appendChild(impBtn); acts.appendChild(addBtn);
+      hdr.appendChild(titleEl); hdr.appendChild(acts);
+
+      // Get roads
+      let roads = isUngrouped
+        ? loadRoads().filter(r => !r.locationId)
+        : loadRoads().filter(r => r.locationId === locationId);
+
+      if (state.search) {
+        const q = state.search;
+        roads = roads.filter(r =>
+          r.name.toLowerCase().includes(q) ||
+          (r.postcode || '').toLowerCase().includes(q)
+        );
+      }
+      const _allVisits = loadVisits(), _allAddrs = loadAddresses();
+      function _roadLastTime(r) {
+        const ids = new Set(_allAddrs.filter(a => a.roadId === r.id).map(a => a.id));
+        const rv = _allVisits.filter(v => ids.has(v.addressId));
+        return rv.length ? Math.max(...rv.map(v => new Date(v.timestamp).getTime())) : 0;
+      }
+      if (state.roadSort === 'name_asc') {
+        roads.sort((a,b) => a.name.localeCompare(b.name));
+      } else if (state.roadSort === 'last_visited_asc') {
+        roads.sort((a,b) => _roadLastTime(a) - _roadLastTime(b));
+      } else {
+        roads.sort((a,b) => _roadLastTime(b) - _roadLastTime(a));
+      }
+
+      const container = document.getElementById('roads-container');
+      container.innerHTML = '';
+
+      if (!roads.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        if (state.search) {
+          empty.textContent = 'No roads match "' + state.search + '".';
+        } else {
+          empty.innerHTML = '<div>No roads yet.</div><div class="empty-state-hint">Click "+ Add Road" to add one.</div>';
+        }
+        container.appendChild(empty);
+      } else {
+        const grid = document.createElement('div');
+        grid.className = state.viewMode === 'grid' ? 'card-grid' : 'list-view';
+        roads.forEach(r => grid.appendChild(state.viewMode === 'grid' ? createRoadCard(r) : createRoadListItem(r)));
+        container.appendChild(grid);
+      }
+    }
+
+    /* ── Render Addresses ─────────────────────────────────── */
+    function renderAddresses() {
+      const road = loadRoads().find(r => r.id === state.currentRoadId);
+
+      // Header
+      const hdr = document.getElementById('addresses-view-header');
+      hdr.innerHTML = '';
+      const titleDiv = document.createElement('div');
+      const titleEl = document.createElement('h2');
+      titleEl.className = 'view-title'; titleEl.textContent = road ? road.name : '';
+      if (road && road.postcode) {
+        const sub = document.createElement('span');
+        sub.className = 'view-title-sub'; sub.textContent = road.postcode;
+        titleEl.appendChild(sub);
+      }
+      titleDiv.appendChild(titleEl);
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn btn-primary'; addBtn.textContent = '+ Add Address';
+      addBtn.addEventListener('click', () => openAddAddressModal(state.currentRoadId));
+      hdr.appendChild(titleDiv); hdr.appendChild(addBtn);
+
+      // Number grid
+      const container = document.getElementById('number-grid-container');
+      container.innerHTML = '';
+      const addresses = loadAddresses().filter(a => a.roadId === state.currentRoadId);
+
+      if (!addresses.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.innerHTML = '<div>No addresses yet.</div><div class="empty-state-hint">Click "+ Add Address" to add house numbers.</div>';
+        container.appendChild(empty);
+        return;
+      }
+
+      const even = [], odd = [], other = [];
+      addresses.forEach(a => {
+        const n = parseAddressNumber(a.address);
+        if (n === null) other.push(a);
+        else if (n % 2 === 0) even.push(a);
+        else odd.push(a);
+      });
+      const sortAddr = arr => arr.sort((a,b) => (parseAddressNumber(a.address) ?? 9999) - (parseAddressNumber(b.address) ?? 9999) || a.address.localeCompare(b.address));
+      sortAddr(even); sortAddr(odd); sortAddr(other);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'number-grid-wrap';
+      [{ label:'Even', items:even }, { label:'Odd', items:odd }, { label:'Other', items:other }]
+        .filter(s => s.items.length)
+        .forEach(sec => {
+          const row = document.createElement('div');
+          row.className = 'number-row';
+          const lbl = document.createElement('div');
+          lbl.className = 'number-row-label'; lbl.textContent = sec.label;
+          const tiles = document.createElement('div');
+          tiles.className = 'number-tiles';
+          sec.items.forEach(addr => {
+            const lv = getLastVisit(addr.id);
+            const tile = document.createElement('button');
+            tile.className = 'number-tile' + (lv ? ' visited' : '');
+            tile.textContent = addr.address;
+            tile.title = lv ? 'Last: ' + lv.outcome : 'No visits yet';
+            tile.addEventListener('click', () => openAddressPanel(addr.id));
+            tiles.appendChild(tile);
+          });
+          row.appendChild(lbl); row.appendChild(tiles);
+          wrap.appendChild(row);
+        });
+      container.appendChild(wrap);
+    }
+
+    /* ── Master Render ────────────────────────────────────── */
+    function render() {
+      updateBreadcrumb();
+      const findLocEl = document.getElementById('view-find-location');
+
+      // If user has no location yet, show the "Find your location" screen
+      const locations = loadPlaces().filter(p => p.type === 'location');
+      const showFindLocation = locations.length === 0 && state.view === 'places';
+
+      findLocEl.classList.toggle('hidden', !showFindLocation);
+      document.getElementById('view-places').classList.toggle('hidden',    state.view !== 'places' || showFindLocation);
+      document.getElementById('view-roads').classList.toggle('hidden',     state.view !== 'roads');
+      document.getElementById('view-addresses').classList.toggle('hidden', state.view !== 'addresses');
+
+      if (showFindLocation)            renderFindLocation();
+      else if (state.view === 'places')    renderPlaces();
+      else if (state.view === 'roads') renderRoads();
+      else                             renderAddresses();
+    }
+
+    /* ── Find Location Screen ────────────────────────────── */
+    function renderFindLocation() {
+      // (Logic handled by event listeners bound in bindStaticEvents)
+      // Just refresh the requests list each time
+      renderMyJoinRequests();
+    }
+
+    function renderMyJoinRequests() {
+      const list = document.getElementById('join-requests-list');
+      if (!list) return;
+      list.innerHTML = '';
+      // Pull requests from localStorage (keyed by rvt_join_requests)
+      const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+      if (!reqs.length) return;
+      list.appendChild(el('div','find-location-sep','Your pending requests:'));
+      reqs.forEach(req => {
+        const row = el('div','join-result-card');
+        row.style.marginBottom = '0.5rem';
+        const info = el('div','join-result-info');
+        info.appendChild(el('div','join-result-name', req.locationName));
+        info.appendChild(el('div','join-result-addr', req.address || ''));
+        const status = el('span','join-request-status ' + req.status, req.status);
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn-danger btn-sm';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+          const all = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+          localStorage.setItem('rvt_join_requests', JSON.stringify(all.filter(r => r.id !== req.id)));
+          renderMyJoinRequests();
+        });
+        row.appendChild(info); row.appendChild(status);
+        if (req.status === 'pending') row.appendChild(cancelBtn);
+        list.appendChild(row);
+      });
+    }
+
+    /* ── Modal System ─────────────────────────────────────── */
+    function openModal(buildFn) {
+      const c = document.getElementById('modal-content');
+      c.innerHTML = '';
+      buildFn(c);
+      document.getElementById('modal-overlay').classList.remove('hidden');
+      setTimeout(() => { const f = c.querySelector('input:not([type=hidden]),textarea,select'); if (f) f.focus(); }, 50);
+    }
+    function closeModal() {
+      document.getElementById('modal-overlay').classList.add('hidden');
+      document.getElementById('modal-content').innerHTML = '';
+    }
+
+    /* ── Confirm Modal ────────────────────────────────────── */
+    function openConfirm({ message, confirmLabel, onConfirm }) {
+      openModal(c => {
+        const title = el('h3','modal-title','Confirm');
+        const msg = el('p','confirm-msg', message);
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        const cancelBtn = btn('btn-ghost','Cancel', closeModal);
+        const confirmBtn = btn('btn-danger', confirmLabel || 'Delete', () => { closeModal(); onConfirm(); });
+        footer.appendChild(cancelBtn); footer.appendChild(confirmBtn);
+        c.appendChild(title); c.appendChild(msg); c.appendChild(footer);
+      });
+    }
+
+    /* ── DOM helpers ──────────────────────────────────────── */
+    function el(tag, cls, text) {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+    function btn(cls, text, onclick) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn ' + cls; b.textContent = text;
+      b.addEventListener('click', onclick);
+      return b;
+    }
+    function field(labelText, inputEl, errorText) {
+      const wrap = el('div','modal-field');
+      const lbl = el('label','modal-label', labelText);
+      lbl.setAttribute('for', inputEl.id || '');
+      wrap.appendChild(lbl); wrap.appendChild(inputEl);
+      if (errorText) {
+        const err = el('div','modal-error', errorText);
+        if (inputEl.id) err.id = 'err-' + inputEl.id;
+        wrap.appendChild(err);
+      }
+      return wrap;
+    }
+    function textInput(id, placeholder, value) {
+      const i = document.createElement('input');
+      i.className = 'modal-input'; i.type = 'text'; i.id = id;
+      if (placeholder) i.placeholder = placeholder;
+      if (value) i.value = value;
+      return i;
+    }
+
+    /* ── New Place Modal ──────────────────────────────────── */
+    function openNewPlaceModal(parentId, childType) {
+      // Location modal: two-tab modal (Search OSM / Individual workspace)
+      openModal(c => {
+        c.appendChild(el('h3','modal-title','Add Location'));
+
+        // Tabs
+        const tabs = el('div','loc-tabs');
+        const tabSearch = el('div','loc-tab active','🔍 Search');
+        const tabIndiv  = el('div','loc-tab','👤 Individual');
+        tabs.appendChild(tabSearch); tabs.appendChild(tabIndiv);
+        c.appendChild(tabs);
+
+        // ── Search panel ──────────────────────────────────────
+        const searchPanel = document.createElement('div');
+
+        const searchRow = el('div','osm-search-row');
+        const searchIn  = textInput('osm-q','e.g. Al-Noor Mosque London','');
+        searchIn.className = 'modal-input';
+        const searchBtn = btn('btn-ghost','Search', doSearch);
+        searchRow.appendChild(searchIn); searchRow.appendChild(searchBtn);
+        searchPanel.appendChild(searchRow);
+
+        const resultsBox = el('div','osm-results');
+        const statusEl   = el('div','osm-status','Type a name and press Search.');
+        resultsBox.appendChild(statusEl);
+        searchPanel.appendChild(resultsBox);
+
+        // Location type selector (shown after OSM result selected)
+        const typeSection = document.createElement('div');
+        typeSection.style.display = 'none';
+        typeSection.appendChild(el('div','modal-label','Location Type'));
+        const typeRow = el('div','loc-type-row');
+        const typeMosque = btn('loc-type-btn active','🕌 Mosque', () => selectType('mosque'));
+        const typeCustom = btn('loc-type-btn','✏️ Custom', () => selectType('custom'));
+        typeRow.appendChild(typeMosque); typeRow.appendChild(typeCustom);
+        typeSection.appendChild(typeRow);
+
+        const customLabelWrap = document.createElement('div');
+        customLabelWrap.style.display = 'none';
+        const customLabelIn = textInput('loc-custom-label','e.g. Community Centre','');
+        customLabelWrap.appendChild(field('Custom Label', customLabelIn, ''));
+        typeSection.appendChild(customLabelWrap);
+
+        // ── Country / City / Town (auto-filled from OSM, editable) ──
+        const hierarchySection = document.createElement('div');
+        hierarchySection.style.marginTop = '0.75rem';
+        hierarchySection.appendChild(el('div','modal-label','Location Hierarchy'));
+        const hierRow = el('div','modal-row');
+        const countryIn = textInput('loc-country','Country e.g. UK','');
+        const cityIn    = textInput('loc-city','City e.g. London','');
+        const townIn    = textInput('loc-town','Town / Area e.g. Camden','');
+        const townWrap  = el('div','modal-field'); townWrap.style.marginBottom = '0';
+        townWrap.appendChild(el('label','modal-label','Town / Area')); townWrap.appendChild(townIn);
+        hierRow.appendChild(field('Country', countryIn, ''));
+        hierRow.appendChild(field('City', cityIn, ''));
+        hierRow.style.marginBottom = '0.5rem';
+        hierarchySection.appendChild(hierRow);
+        hierarchySection.appendChild(townWrap);
+        searchPanel.appendChild(typeSection);
+        searchPanel.appendChild(hierarchySection);
+
+        c.appendChild(searchPanel);
+
+        // ── Individual panel ──────────────────────────────────
+        const indivPanel = document.createElement('div');
+        indivPanel.style.display = 'none';
+        const indivNameIn = textInput('indiv-name','My workspace name','');
+        indivPanel.appendChild(field('Workspace Name', indivNameIn, 'Name is required.'));
+
+        // Country/City/Town for individual workspace
+        const indivHierRow = el('div','modal-row');
+        const indivCountryIn = textInput('indiv-country','Country e.g. UK','');
+        const indivCityIn    = textInput('indiv-city','City e.g. London','');
+        const indivTownWrap  = el('div','modal-field');
+        const indivTownIn    = textInput('indiv-town','Town / Area e.g. Camden','');
+        indivTownWrap.appendChild(el('label','modal-label','Town / Area')); indivTownWrap.appendChild(indivTownIn);
+        indivHierRow.appendChild(field('Country', indivCountryIn, ''));
+        indivHierRow.appendChild(field('City', indivCityIn, ''));
+        indivPanel.appendChild(el('div','modal-label','Location Hierarchy'));
+        indivPanel.appendChild(indivHierRow);
+        indivPanel.appendChild(indivTownWrap);
+        c.appendChild(indivPanel);
+
+        // Footer
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        const createBtn = btn('btn-primary','Create Location', onCreate);
+        footer.appendChild(btn('btn-ghost','Cancel',closeModal));
+        footer.appendChild(createBtn);
+        c.appendChild(footer);
+
+        // State
+        let mode = 'search';
+        let selectedOsm = null;
+        let locType = 'mosque';
+
+        function selectType(t) {
+          locType = t;
+          typeMosque.classList.toggle('active', t === 'mosque');
+          typeCustom.classList.toggle('active', t === 'custom');
+          customLabelWrap.style.display = t === 'custom' ? 'block' : 'none';
+        }
+
+        // Tab switching
+        tabSearch.addEventListener('click', () => {
+          mode = 'search';
+          tabSearch.classList.add('active'); tabIndiv.classList.remove('active');
+          searchPanel.style.display = ''; indivPanel.style.display = 'none';
+        });
+        tabIndiv.addEventListener('click', () => {
+          mode = 'individual';
+          tabIndiv.classList.add('active'); tabSearch.classList.remove('active');
+          indivPanel.style.display = ''; searchPanel.style.display = 'none';
+        });
+
+        // Enter key triggers search
+        searchIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+
+        async function doSearch() {
+          const q = searchIn.value.trim();
+          if (!q) return;
+          statusEl.textContent = 'Searching…';
+          resultsBox.innerHTML = ''; resultsBox.appendChild(statusEl);
+          selectedOsm = null; typeSection.style.display = 'none';
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=6`,
+              { headers: { 'Accept-Language': 'en' } }
+            );
+            const data = await res.json();
+            resultsBox.innerHTML = '';
+            if (!data.length) {
+              resultsBox.appendChild(el('div','osm-status','No results found. Try a different search.'));
+              return;
+            }
+            data.forEach(item => {
+              const card = el('div','osm-result-card');
+              card.appendChild(el('div','osm-result-name', item.display_name.split(',')[0]));
+              card.appendChild(el('div','osm-result-addr', item.display_name));
+              card.addEventListener('click', () => {
+                resultsBox.querySelectorAll('.osm-result-card').forEach(x => x.classList.remove('selected'));
+                card.classList.add('selected');
+                const addr = item.address || {};
+                selectedOsm = {
+                  name:        item.display_name.split(',')[0],
+                  address:     item.display_name,
+                  lat:         parseFloat(item.lat),
+                  lng:         parseFloat(item.lon),
+                  osm_place_id: item.osm_type + item.osm_id,
+                  country:     addr.country || '',
+                  city:        addr.city || addr.town || addr.municipality || addr.county || '',
+                  town:        addr.suburb || addr.neighbourhood || addr.quarter || addr.village || '',
+                };
+                // Auto-fill hierarchy fields from OSM address data
+                countryIn.value = selectedOsm.country;
+                cityIn.value    = selectedOsm.city;
+                townIn.value    = selectedOsm.town;
+                typeSection.style.display = 'block';
+              });
+              resultsBox.appendChild(card);
+            });
+          } catch(e) {
+            resultsBox.innerHTML = '';
+            resultsBox.appendChild(el('div','osm-status','Search failed. Check your connection.'));
+          }
+        }
+
+        function onCreate() {
+          if (mode === 'individual') {
+            const name = indivNameIn.value.trim();
+            if (!name) { alert('Please enter a workspace name.'); return; }
+            const places = loadPlaces();
+            if (places.find(p => p.type === 'location' && p.name.toLowerCase() === name.toLowerCase())) {
+              alert('A location with this name already exists.'); return;
+            }
+            const newPlace = {
+              id: uid(), parentId: null, type: 'location', name, locationType: 'individual',
+              country: indivCountryIn.value.trim(),
+              city:    indivCityIn.value.trim(),
+              town:    indivTownIn.value.trim(),
+            };
+            places.push(newPlace); savePlaces(places);
+            _syncCreatePlace(newPlace);
+            closeModal(); render();
+          } else {
+            if (!selectedOsm) { alert('Please select a location from the search results.'); return; }
+            const places = loadPlaces();
+            if (places.find(p => p.osmPlaceId === selectedOsm.osm_place_id)) {
+              alert('This location already exists. You can request to join it instead.'); closeModal(); return;
+            }
+            const customLabel = locType === 'custom' ? customLabelIn.value.trim() : '';
+            const newPlace = {
+              id:          uid(),
+              parentId:    null,
+              type:        'location',
+              name:        selectedOsm.name,
+              address:     selectedOsm.address,
+              lat:         selectedOsm.lat,
+              lng:         selectedOsm.lng,
+              osmPlaceId:  selectedOsm.osm_place_id,
+              locationType: locType,
+              locationTypeLabel: customLabel || null,
+              country:     countryIn.value.trim() || selectedOsm.country,
+              city:        cityIn.value.trim()    || selectedOsm.city,
+              town:        townIn.value.trim()    || selectedOsm.town,
+            };
+            places.push(newPlace); savePlaces(places);
+            _syncCreatePlace(newPlace);
+            closeModal(); render();
+          }
+        }
+      });
+    }
+
+    /* ── Edit Place Modal ─────────────────────────────────── */
+    function openEditPlaceModal(placeId) {
+      const place = loadPlaces().find(p => p.id === placeId);
+      if (!place) return;
+      openModal(c => {
+        const titleEl = el('h3','modal-title','Edit ' + TYPE_LABEL[place.type]);
+        const nameIn = textInput('ep-name','', place.name);
+        const nameField = field('Name', nameIn, 'Name is required.');
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        footer.appendChild(btn('btn-ghost','Cancel',closeModal));
+        footer.appendChild(btn('btn-primary','Save', () => {
+          const name = nameIn.value.trim();
+          if (!name) { document.getElementById('err-ep-name').classList.add('visible'); return; }
+          const places = loadPlaces();
+          const idx = places.findIndex(p => p.id === placeId);
+          if (idx !== -1) { places[idx].name = name; savePlaces(places); _syncUpdatePlace(placeId, { name }); }
+          // update breadcrumb stack if this place is in it
+          state.placeStack.forEach(s => { if (s.id === placeId) s.name = name; });
+          closeModal(); render();
+        }));
+        c.appendChild(titleEl); c.appendChild(nameField); c.appendChild(footer);
+      });
+    }
+
+    /* ── Members storage helpers ─────────────────────────── */
+    function loadMembers(locationId) {
+      return JSON.parse(localStorage.getItem('rvt_members_' + locationId) || '[]');
+    }
+    function saveMembers(locationId, list) {
+      localStorage.setItem('rvt_members_' + locationId, JSON.stringify(list));
+    }
+
+    /* ── Admin: Members Modal ────────────────────────────── */
+    function openMembersModal(locationId) {
+      const location = loadPlaces().find(p => p.id === locationId);
+      openModal(c => {
+        c.appendChild(el('h3','modal-title','👥 Members — ' + (location?.name || '')));
+
+        // Combined member list: manually added + approved join requests
+        function getAllMembers() {
+          const manual = loadMembers(locationId);
+          const approved = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
+            .filter(r => r.locationId === locationId && r.status === 'approved' && r.userName)
+            .map(r => r.userName);
+          return [...new Set([...manual, ...approved])];
+        }
+
+        const listEl = el('div','osm-results');
+        listEl.style.maxHeight = '260px';
+
+        function refreshList() {
+          listEl.innerHTML = '';
+          const all = getAllMembers();
+          if (!all.length) {
+            listEl.appendChild(el('div','osm-status','No members yet. Add one below or approve join requests.'));
+            return;
+          }
+          all.forEach(name => {
+            const row = el('div','join-result-card');
+            row.style.marginBottom = '0.4rem';
+            const info = el('div','join-result-info');
+            info.appendChild(el('div','join-result-name', name));
+            const removeBtn = btn('btn-danger btn-sm','Remove', () => {
+              const manual = loadMembers(locationId).filter(m => m !== name);
+              saveMembers(locationId, manual);
+              // Also mark join request as removed
+              const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+              const idx = reqs.findIndex(r => r.locationId === locationId && r.userName === name);
+              if (idx !== -1) { reqs[idx].status = 'removed'; localStorage.setItem('rvt_join_requests', JSON.stringify(reqs)); }
+              refreshList();
+            });
+            row.appendChild(info); row.appendChild(removeBtn);
+            listEl.appendChild(row);
+          });
+        }
+        refreshList();
+        c.appendChild(listEl);
+
+        // ── Invite by email + shareable link ──
+        c.appendChild(el('div','modal-label','Invite Someone'));
+
+        // Build join token from location data
+        const locSnapshot = {
+          id:                location.id,
+          name:              location.name,
+          locationType:      location.locationType || 'custom',
+          locationTypeLabel: location.locationTypeLabel || null,
+          country:           location.country || '',
+          city:              location.city    || '',
+          town:              location.town    || '',
+          address:           location.address || '',
+        };
+        const joinToken  = btoa(unescape(encodeURIComponent(JSON.stringify(locSnapshot))));
+        const loginBase  = window.location.href.replace('index-v2.html', 'login-v2.html').split('?')[0];
+        const joinUrl    = loginBase + '?join=' + joinToken;
+
+        const inviteRow = el('div','settings-add-row');
+        const emailIn   = document.createElement('input');
+        emailIn.className = 'modal-input'; emailIn.type = 'email';
+        emailIn.placeholder = 'Their email (optional — for your records)';
+
+        const getBtn = btn('btn-primary btn-sm','Get Invite Link', () => {
+          const email = emailIn.value.trim();
+          if (email) {
+            const manual = loadMembers(locationId);
+            if (!getAllMembers().includes(email)) { manual.push(email); saveMembers(locationId, manual); refreshList(); }
+          }
+          linkBox.classList.remove('hidden');
+          linkIn.focus(); linkIn.select();
+        });
+        inviteRow.appendChild(emailIn); inviteRow.appendChild(getBtn);
+        c.appendChild(inviteRow);
+
+        // Link box (hidden until "Get Invite Link" clicked)
+        const linkBox = el('div','hidden');
+        linkBox.style.marginTop = '0.65rem';
+        linkBox.appendChild(el('div','modal-label','Share this link — they sign up, they join automatically'));
+        const linkRow = el('div','settings-add-row');
+        const linkIn  = document.createElement('input');
+        linkIn.className = 'modal-input'; linkIn.type = 'text';
+        linkIn.value = joinUrl; linkIn.readOnly = true;
+        linkIn.style.fontSize = '0.72rem';
+        const copyBtn = btn('btn-ghost btn-sm','📋 Copy', () => {
+          navigator.clipboard.writeText(joinUrl)
+            .then(() => { copyBtn.textContent = '✓ Copied!'; setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 2000); })
+            .catch(() => { linkIn.select(); document.execCommand('copy'); copyBtn.textContent = '✓ Copied!'; setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 2000); });
+        });
+        linkRow.appendChild(linkIn); linkRow.appendChild(copyBtn);
+        linkBox.appendChild(linkRow);
+        c.appendChild(linkBox);
+
+        const footer = el('div','modal-footer');
+        footer.appendChild(btn('btn-ghost','Close', closeModal));
+        c.appendChild(footer);
+      });
+    }
+
+    /* ── Admin: Join Requests Modal ──────────────────────── */
+    function openJoinRequestsModal(locationId) {
+      const location = loadPlaces().find(p => p.id === locationId);
+      openModal(c => {
+        c.appendChild(el('h3','modal-title','📋 Join Requests — ' + (location?.name || '')));
+
+        const pending = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
+          .filter(r => r.locationId === locationId && r.status === 'pending');
+
+        if (!pending.length) {
+          c.appendChild(el('div','osm-status','No pending requests.'));
+        } else {
+          const list = el('div','osm-results');
+          list.style.maxHeight = '320px';
+          pending.forEach(r => {
+            const row = el('div','join-result-card');
+            row.style.marginBottom = '0.5rem';
+            const info = el('div','join-result-info');
+            info.appendChild(el('div','join-result-name', r.userName || 'User'));
+            info.appendChild(el('div','join-result-addr', 'Requested ' + new Date(r.createdAt).toLocaleDateString()));
+            const approveBtn = btn('btn-primary btn-sm','Approve', () => {
+              updateJoinRequest(r.id, 'approved');
+              closeModal(); render();
+            });
+            const rejectBtn = btn('btn-danger btn-sm','Reject', () => {
+              updateJoinRequest(r.id, 'rejected');
+              closeModal(); render();
+            });
+            const btnWrap = el('div','card-actions');
+            btnWrap.appendChild(approveBtn); btnWrap.appendChild(rejectBtn);
+            row.appendChild(info); row.appendChild(btnWrap);
+            list.appendChild(row);
+          });
+          c.appendChild(list);
+        }
+
+        const footer = el('div','modal-footer');
+        footer.appendChild(btn('btn-ghost','Close', closeModal));
+        c.appendChild(footer);
+      });
+    }
+
+    function updateJoinRequest(id, status) {
+      const all = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+      const idx = all.findIndex(r => r.id === id);
+      if (idx !== -1) {
+        all[idx].status = status;
+        all[idx].reviewedAt = new Date().toISOString();
+        localStorage.setItem('rvt_join_requests', JSON.stringify(all));
+      }
+    }
+
+    /* ── New Road Modal ───────────────────────────────────── */
+    function openNewRoadModal(locationId) {
+      openModal(c => {
+        const titleEl = el('h3','modal-title','New Road');
+        const nameIn = textInput('nr-name','e.g. Oak Street','');
+        const nameField = field('Road Name', nameIn, 'Road name is required.');
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+
+        footer.appendChild(btn('btn-ghost','Cancel',closeModal));
+        footer.appendChild(btn('btn-primary','Create Road', () => {
+          const name = nameIn.value.trim();
+          if (!name) { document.getElementById('err-nr-name').classList.add('visible'); return; }
+          const road = { id:uid(), name, locationId: locationId || null, tags:[], createdAt:new Date().toISOString() };
+          const roads = loadRoads(); roads.push(road); saveRoads(roads);
+          _syncCreateRoad(road);
+          closeModal(); render();
+        }));
+
+        c.appendChild(titleEl); c.appendChild(nameField);
+        c.appendChild(footer);
+      });
+    }
+
+    /* ── Assign Tags Modal (quick access from card) ──────── */
+    function openTagAssignModal(roadId) {
+      const road = loadRoads().find(r => r.id === roadId);
+      if (!road) return;
+      const locationTags = loadTags(road.locationId);
+      if (!locationTags.length) return;
+      openModal(c => {
+        c.appendChild(el('h3','modal-title','Tags — ' + road.name));
+        const selectedTags = new Set(road.tags || []);
+        const chipRow = document.createElement('div');
+        chipRow.className = 'tag-toggle-row';
+        chipRow.style.marginBottom = '16px';
+        locationTags.forEach(tag => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'tag-toggle-chip' + (selectedTags.has(tag.id) ? ' active' : '');
+          chip.textContent = tag.name;
+          if (selectedTags.has(tag.id)) chip.style.cssText = `background:${tag.color}22;border-color:${tag.color};color:${tag.color};`;
+          chip.addEventListener('click', () => {
+            if (selectedTags.has(tag.id)) {
+              selectedTags.delete(tag.id); chip.classList.remove('active'); chip.style.cssText = '';
+            } else {
+              selectedTags.add(tag.id); chip.classList.add('active');
+              chip.style.cssText = `background:${tag.color}22;border-color:${tag.color};color:${tag.color};`;
+            }
+          });
+          chipRow.appendChild(chip);
+        });
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        footer.appendChild(btn('btn-ghost','Cancel', closeModal));
+        footer.appendChild(btn('btn-primary','Save', () => {
+          const roads = loadRoads();
+          const idx = roads.findIndex(r => r.id === roadId);
+          if (idx !== -1) { roads[idx].tags = [...selectedTags]; saveRoads(roads); _syncTagAssignments(roadId, [...selectedTags]); }
+          closeModal(); render();
+        }));
+        c.appendChild(chipRow); c.appendChild(footer);
+      });
+    }
+
+    /* ── Manage Tags Modal ────────────────────────────────── */
+    const TAG_COLORS = ['#C9A84C','#50c878','#4a90d9','#e05c5c','#9b59b6','#e67e22'];
+
+    function openManageTagsModal(locationId) {
+      openModal(c => {
+        const titleEl = el('h3','modal-title','Manage Tags');
+        c.appendChild(titleEl);
+
+        function renderTagList() {
+          let listEl = c.querySelector('.manage-tags-list');
+          if (listEl) listEl.remove();
+          listEl = document.createElement('div');
+          listEl.className = 'manage-tags-list';
+          const tags = loadTags(locationId);
+          if (!tags.length) {
+            const empty = document.createElement('div');
+            empty.style.cssText = 'color:var(--text-muted);font-size:0.8rem;margin-bottom:8px;';
+            empty.textContent = 'No tags yet. Create one below.';
+            listEl.appendChild(empty);
+          }
+          tags.forEach(tag => {
+            const row = document.createElement('div');
+            row.className = 'manage-tag-row';
+            const swatch = document.createElement('span');
+            swatch.className = 'manage-tag-swatch';
+            swatch.style.background = tag.color;
+            const nameEl = document.createElement('span');
+            nameEl.style.flex = '1'; nameEl.textContent = tag.name;
+            const delBtn = document.createElement('button');
+            delBtn.className = 'icon-btn del'; delBtn.textContent = '🗑';
+            delBtn.title = 'Delete tag';
+            delBtn.addEventListener('click', () => {
+              const updated = loadTags(locationId).filter(t => t.id !== tag.id);
+              saveTags(locationId, updated);
+              _syncDeleteTag(tag.id);
+              // Remove tag from all roads in this location
+              const roads = loadRoads();
+              roads.filter(r => r.locationId === locationId).forEach(r => {
+                if (r.tags) r.tags = r.tags.filter(tid => tid !== tag.id);
+              });
+              saveRoads(roads);
+              renderTagList();
+            });
+            row.appendChild(swatch); row.appendChild(nameEl); row.appendChild(delBtn);
+            listEl.appendChild(row);
+          });
+          c.insertBefore(listEl, c.querySelector('.modal-footer'));
+        }
+
+        // New tag form
+        const newTagSection = document.createElement('div');
+        newTagSection.className = 'form-group';
+        const newTagLbl = document.createElement('label');
+        newTagLbl.textContent = 'New Tag Name';
+        const newTagIn = document.createElement('input');
+        newTagIn.type = 'text'; newTagIn.className = 'modal-input'; newTagIn.placeholder = 'e.g. Priority, Follow Up…';
+
+        let selectedColor = TAG_COLORS[0];
+        const colorRow = document.createElement('div');
+        colorRow.className = 'tag-color-options';
+        TAG_COLORS.forEach((col, i) => {
+          const dot = document.createElement('button');
+          dot.type = 'button';
+          dot.className = 'tag-color-opt' + (i === 0 ? ' selected' : '');
+          dot.style.background = col;
+          dot.title = col;
+          dot.addEventListener('click', () => {
+            selectedColor = col;
+            colorRow.querySelectorAll('.tag-color-opt').forEach(d => d.classList.remove('selected'));
+            dot.classList.add('selected');
+          });
+          colorRow.appendChild(dot);
+        });
+
+        newTagSection.appendChild(newTagLbl); newTagSection.appendChild(newTagIn); newTagSection.appendChild(colorRow);
+
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        footer.appendChild(btn('btn-ghost','Close', closeModal));
+        footer.appendChild(btn('btn-primary','Add Tag', () => {
+          const name = newTagIn.value.trim();
+          if (!name) return;
+          const newTag = { id: uid(), name, color: selectedColor };
+          const tags = loadTags(locationId);
+          tags.push(newTag);
+          saveTags(locationId, tags);
+          _syncCreateTag(newTag, locationId);
+          newTagIn.value = '';
+          renderTagList();
+          render();
+        }));
+
+        c.appendChild(newTagSection); c.appendChild(footer);
+        renderTagList();
+      });
+    }
+
+    /* ── Edit Road Modal ──────────────────────────────────── */
+    function openEditRoadModal(roadId) {
+      const road = loadRoads().find(r => r.id === roadId);
+      if (!road) return;
+      openModal(c => {
+        const titleEl = el('h3','modal-title','Edit Road');
+        const nameIn = textInput('er-name','',road.name);
+        const nameField = field('Road Name', nameIn, 'Name is required.');
+        const pcIn = textInput('er-postcode','e.g. SW1A 1AA', road.postcode || '');
+        const pcField = field('Postcode', pcIn, '');
+
+        // Tags section
+        const locationTags = loadTags(road.locationId);
+        const selectedTags = new Set(road.tags || []);
+        let tagSection = null;
+        if (locationTags.length) {
+          tagSection = document.createElement('div');
+          tagSection.className = 'form-group';
+          const tagLbl = document.createElement('label');
+          tagLbl.textContent = 'Tags';
+          const chipRow = document.createElement('div');
+          chipRow.className = 'tag-toggle-row';
+          locationTags.forEach(tag => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'tag-toggle-chip' + (selectedTags.has(tag.id) ? ' active' : '');
+            chip.textContent = tag.name;
+            if (selectedTags.has(tag.id)) chip.style.cssText = `background:${tag.color}22;border-color:${tag.color};color:${tag.color};`;
+            chip.addEventListener('click', () => {
+              if (selectedTags.has(tag.id)) {
+                selectedTags.delete(tag.id);
+                chip.classList.remove('active');
+                chip.style.cssText = '';
+              } else {
+                selectedTags.add(tag.id);
+                chip.classList.add('active');
+                chip.style.cssText = `background:${tag.color}22;border-color:${tag.color};color:${tag.color};`;
+              }
+            });
+            chipRow.appendChild(chip);
+          });
+          tagSection.appendChild(tagLbl); tagSection.appendChild(chipRow);
+        }
+
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        footer.appendChild(btn('btn-ghost','Cancel',closeModal));
+        footer.appendChild(btn('btn-primary','Save', () => {
+          const name = nameIn.value.trim();
+          if (!name) { document.getElementById('err-er-name').classList.add('visible'); return; }
+          const roads = loadRoads();
+          const idx = roads.findIndex(r => r.id === roadId);
+          if (idx !== -1) {
+            roads[idx].name = name;
+            roads[idx].postcode = pcIn.value.trim();
+            roads[idx].tags = [...selectedTags];
+            saveRoads(roads);
+            _syncUpdateRoad(roadId, { name, postcode: pcIn.value.trim() || null });
+            _syncTagAssignments(roadId, [...selectedTags]);
+          }
+          state.placeStack.forEach(s => { if (s.id === roadId) s.name = name; });
+          closeModal(); render();
+        }));
+        c.appendChild(titleEl); c.appendChild(nameField); c.appendChild(pcField);
+        if (tagSection) c.appendChild(tagSection);
+        c.appendChild(footer);
+      });
+    }
+
+    /* ── Add Address Modal ────────────────────────────────── */
+    function openAddAddressModal(roadId) {
+      openModal(c => {
+        const titleEl = el('h3','modal-title','Add Address');
+        const addrIn = textInput('aa-addr','e.g. 14 or 14B or Flat 3','');
+        const addrField = field('House Number / Address', addrIn, 'Address is required.');
+        const dupErr = el('div','modal-error','This address already exists on this road.');
+        dupErr.id = 'err-aa-dup';
+        addrField.appendChild(dupErr);
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        footer.appendChild(btn('btn-ghost','Cancel',closeModal));
+        footer.appendChild(btn('btn-primary','Add', () => {
+          const address = addrIn.value.trim();
+          if (!address) { document.getElementById('err-aa-addr').classList.add('visible'); return; }
+          const addresses = loadAddresses();
+          if (addresses.some(a => a.roadId === roadId && a.address.toLowerCase() === address.toLowerCase())) {
+            dupErr.classList.add('visible'); return;
+          }
+          const newAddr = { id:uid(), roadId, address };
+          addresses.push(newAddr);
+          saveAddresses(addresses);
+          _syncCreateAddress(newAddr);
+          closeModal(); render();
+        }));
+        c.appendChild(titleEl); c.appendChild(addrField); c.appendChild(footer);
+      });
+    }
+
+    /* ── Log Visit Modal ──────────────────────────────────── */
+    function openLogVisitModal(addressId) {
+      const outcomes  = loadOutcomes();
+      const settings  = loadSettings();
+      const addr      = loadAddresses().find(a => a.id === addressId);
+      let selectedChip = '';
+
+      openModal(c => {
+        c.appendChild(el('h3','modal-title','Log Visit — ' + (addr ? addr.address : '')));
+
+        // Outcome chips
+        c.appendChild(el('div','modal-label','Outcome'));
+        const chipsWrap = el('div','outcome-chips');
+        outcomes.forEach(opt => {
+          const chip = el('button','outcome-chip', opt);
+          chip.type = 'button';
+          chip.addEventListener('click', () => {
+            selectedChip = selectedChip === opt ? '' : opt;
+            chipsWrap.querySelectorAll('.outcome-chip').forEach(ch => ch.classList.toggle('selected', ch.textContent === selectedChip));
+          });
+          chipsWrap.appendChild(chip);
+        });
+        c.appendChild(chipsWrap);
+
+        // Notes
+        c.appendChild(el('div','modal-label','Notes (optional)'));
+        const notesEl = document.createElement('textarea');
+        notesEl.className = 'modal-textarea'; notesEl.style.minHeight = '70px';
+        notesEl.placeholder = 'Any additional details...';
+        c.appendChild(notesEl);
+
+        const outcomeErr = el('div','modal-error','Please select an outcome or add notes.');
+        c.appendChild(outcomeErr);
+
+        // Date/time + Entered by
+        const row = el('div','modal-row'); row.style.marginTop = '0.75rem';
+        const dtWrap = el('div','modal-field'); dtWrap.style.marginBottom = '0';
+        dtWrap.appendChild(el('label','modal-label','Date & Time'));
+        const dtIn = document.createElement('input');
+        dtIn.className = 'modal-input'; dtIn.type = 'datetime-local'; dtIn.value = toDatetimeLocal(new Date());
+        dtWrap.appendChild(dtIn);
+
+        const byWrap = el('div','modal-field'); byWrap.style.marginBottom = '0';
+        byWrap.appendChild(el('label','modal-label','Entered By'));
+
+        // Auto-fill: auth user > saved setting > empty
+        const authUser = window._rvtAuthUser;
+        const defaultName = (authUser && (authUser.name || authUser.email)) || settings.currentUser || '';
+
+        // Build member list for dropdown: auth user + approved members for current location
+        const memberNames = [];
+        if (authUser && (authUser.name || authUser.email)) memberNames.push(authUser.name || authUser.email);
+        const locationMembers = JSON.parse(localStorage.getItem('rvt_members_' + (state.currentLocationId || '')) || '[]');
+        locationMembers.forEach(m => { if (m && !memberNames.includes(m)) memberNames.push(m); });
+        const approvedReqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
+          .filter(r => r.locationId === state.currentLocationId && r.status === 'approved' && r.userName);
+        approvedReqs.forEach(r => { if (!memberNames.includes(r.userName)) memberNames.push(r.userName); });
+
+        let byIn;
+        if (memberNames.length > 1) {
+          // Show dropdown if multiple members known
+          byIn = document.createElement('select');
+          byIn.className = 'modal-input';
+          memberNames.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            if (name === defaultName) opt.selected = true;
+            byIn.appendChild(opt);
+          });
+          const otherOpt = document.createElement('option'); otherOpt.value = ''; otherOpt.textContent = '— type a name —';
+          byIn.appendChild(otherOpt);
+        } else {
+          byIn = textInput('','Your name', defaultName);
+        }
+        byWrap.appendChild(byIn);
+
+        row.appendChild(dtWrap); row.appendChild(byWrap);
+        c.appendChild(row);
+
+        // Footer
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        footer.appendChild(btn('btn-ghost','Cancel',closeModal));
+        footer.appendChild(btn('btn-primary','Save Visit', () => {
+          const notesVal = notesEl.value.trim();
+          if (!selectedChip && !notesVal) { outcomeErr.classList.add('visible'); return; }
+          outcomeErr.classList.remove('visible');
+          const outcome = selectedChip ? (notesVal ? selectedChip + ' — ' + notesVal : selectedChip) : notesVal;
+          const timestamp = dtIn.value ? new Date(dtIn.value).toISOString() : new Date().toISOString();
+          const enteredBy = byIn.value.trim();
+          if (enteredBy) { const s = loadSettings(); s.currentUser = enteredBy; saveSettings(s); }
+          const visits = loadVisits();
+          const newVisit = { id:uid(), addressId, outcome, timestamp, enteredBy };
+          visits.push(newVisit);
+          saveVisits(visits);
+          _syncCreateVisit(newVisit);
+          closeModal(); render();
+        }));
+        c.appendChild(footer);
+      });
+    }
+
+    /* ── Address Panel Modal ──────────────────────────────── */
+    function openAddressPanel(addressId) {
+      const addr = loadAddresses().find(a => a.id === addressId);
+      const road = addr ? loadRoads().find(r => r.id === addr.roadId) : null;
+      const lv   = getLastVisit(addressId);
+      let histExpanded = false;
+
+      openModal(c => {
+        c.appendChild(el('div','addr-panel-number', addr ? addr.address : ''));
+        c.appendChild(el('div','addr-panel-road', road ? road.name + (road.postcode ? ' · ' + road.postcode : '') : ''));
+
+        // Last visit
+        const lvBox = el('div','addr-last-visit');
+        lvBox.appendChild(el('div','addr-last-label','Last Visit'));
+        if (lv) {
+          lvBox.appendChild(el('div','addr-last-outcome', lv.outcome));
+          lvBox.appendChild(el('div','addr-last-meta', formatDate(lv.timestamp) + (lv.enteredBy ? ' · by ' + lv.enteredBy : '')));
+        } else {
+          const none = el('div','','No visits yet.');
+          none.style.cssText = 'font-size:0.83rem;color:var(--text-muted);font-style:italic';
+          lvBox.appendChild(none);
+        }
+        c.appendChild(lvBox);
+
+        // History toggle
+        const histBtn = el('button','history-toggle-btn','+ Show History');
+        const histSec = el('div','history-section');
+        histSec.appendChild(buildHistoryList(addressId));
+        histBtn.addEventListener('click', () => {
+          histExpanded = !histExpanded;
+          histSec.classList.toggle('expanded', histExpanded);
+          histBtn.textContent = histExpanded ? '– Hide History' : '+ Show History';
+        });
+        c.appendChild(histBtn); c.appendChild(histSec);
+
+        // Footer
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer spread';
+
+        const delBtn = btn('btn-danger btn-sm','Delete Address', () => {
+          closeModal();
+          openConfirm({
+            message: `Delete address "${addr ? addr.address : ''}"? All visit history will also be removed.`,
+            confirmLabel: 'Delete Address',
+            onConfirm() {
+              saveAddresses(loadAddresses().filter(a => a.id !== addressId));
+              saveVisits(loadVisits().filter(v => v.addressId !== addressId));
+              _syncDeleteAddress(addressId);
+              render();
+            }
+          });
+        });
+
+        const rightBtns = document.createElement('div');
+        rightBtns.style.cssText = 'display:flex;gap:0.65rem';
+        rightBtns.appendChild(btn('btn-ghost','Close',closeModal));
+        rightBtns.appendChild(btn('btn-primary','Log Visit', () => openLogVisitModal(addressId)));
+
+        footer.appendChild(delBtn); footer.appendChild(rightBtns);
+        c.appendChild(footer);
+      });
+    }
+
+    function buildHistoryList(addressId) {
+      const visits = loadVisits().filter(v => v.addressId === addressId).sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp));
+      const ul = el('ul','history-list');
+      ul.style.marginBottom = '0.65rem';
+      if (!visits.length) { ul.appendChild(el('li','history-empty','No visits logged yet.')); return ul; }
+      visits.forEach(v => {
+        const li = el('li','history-item');
+        li.appendChild(el('div','history-item-date', formatDate(v.timestamp)));
+        li.appendChild(el('div','history-item-outcome', v.outcome));
+        if (v.enteredBy) li.appendChild(el('div','history-item-by','By: ' + v.enteredBy));
+        ul.appendChild(li);
+      });
+      return ul;
+    }
+
+    /* ── Settings Modal ───────────────────────────────────── */
+    function openSettingsModal() {
+      openModal(c => {
+        c.appendChild(el('h3','modal-title','Settings'));
+
+        const nameIn = textInput('s-name','Enter your name', loadSettings().currentUser || '');
+        c.appendChild(field('Your Name', nameIn, ''));
+
+        c.appendChild(el('div','modal-label','Standard Outcome Options'));
+        const chipList = el('div','settings-chip-list');
+
+        function rebuildChips() {
+          chipList.innerHTML = '';
+          loadOutcomes().forEach((opt,i) => {
+            const chip = el('span','settings-chip', opt);
+            const rm = el('button','settings-chip-remove','×');
+            rm.addEventListener('click', () => { const o = loadOutcomes(); o.splice(i,1); saveOutcomes(o); rebuildChips(); });
+            chip.appendChild(rm); chipList.appendChild(chip);
+          });
+        }
+        rebuildChips();
+        c.appendChild(chipList);
+
+        const addRow = el('div','settings-add-row');
+        const addIn = textInput('','New outcome option','');
+        addIn.className = 'modal-input';
+        const addBtn2 = btn('btn-ghost btn-sm','Add', () => {
+          const v = addIn.value.trim();
+          if (!v) return;
+          const o = loadOutcomes();
+          if (!o.includes(v)) { o.push(v); saveOutcomes(o); }
+          addIn.value = ''; rebuildChips();
+        });
+        addIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addBtn2.click(); } });
+        addRow.appendChild(addIn); addRow.appendChild(addBtn2);
+        c.appendChild(addRow);
+
+        // Theme toggle
+        c.appendChild(el('div','modal-label','Theme'));
+        const themeGroup = el('div','theme-toggle-group');
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+        const darkBtn = btn('theme-btn' + (currentTheme === 'dark' ? ' active' : ''), '🌙 Dark', () => {
+          document.documentElement.setAttribute('data-theme', 'dark');
+          localStorage.setItem('rvt_theme', 'dark');
+          darkBtn.classList.add('active'); lightBtn.classList.remove('active');
+        });
+        const lightBtn = btn('theme-btn' + (currentTheme === 'light' ? ' active' : ''), '☀️ Light', () => {
+          document.documentElement.setAttribute('data-theme', 'light');
+          localStorage.setItem('rvt_theme', 'light');
+          lightBtn.classList.add('active'); darkBtn.classList.remove('active');
+        });
+        themeGroup.appendChild(darkBtn); themeGroup.appendChild(lightBtn);
+        c.appendChild(themeGroup);
+
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
+        footer.appendChild(btn('btn-primary','Save', () => {
+          const s = loadSettings(); s.currentUser = nameIn.value.trim(); saveSettings(s); closeModal();
+        }));
+        c.appendChild(footer);
+      });
+    }
+
+    /* ── CSV Import / Export ──────────────────────────────── */
+    function downloadTemplate() {
+      const csv = ['Road Name,Postcode,Address','Oak Street,SW1A 1AA,1','Oak Street,SW1A 1AA,2','Oak Street,SW1A 1AA,3','Elm Avenue,EC1A 1BB,14','Elm Avenue,EC1A 1BB,16'].join('\r\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+      a.download = 'road-visits-template.csv'; a.click();
+    }
+
+    function showImportFeedback(msg, type) {
+      const el2 = document.getElementById('import-feedback');
+      el2.textContent = msg; el2.className = 'import-feedback ' + type;
+      el2.classList.remove('hidden');
+      setTimeout(() => el2.classList.add('hidden'), 5000);
+    }
+
+    function importCSV(file) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const lines = e.target.result.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+        if (!lines.length) { showImportFeedback('File is empty.','error'); return; }
+        const first = lines[0].toLowerCase();
+        const hasHeader = first.startsWith('road') || first.startsWith('name');
+        const dataLines = hasHeader ? lines.slice(1) : lines;
+        const headerCols = hasHeader ? lines[0].split(',').map(c => c.trim().toLowerCase()) : [];
+        const hasPostcode = headerCols.length >= 3 && headerCols[1].includes('post');
+
+        const roads = loadRoads(), addresses = loadAddresses();
+        let newRoads = 0, newAddresses = 0;
+
+        const currentLocId = state.currentLocationId || null;
+        dataLines.forEach(line => {
+          const parts = line.split(',');
+          const roadName = (parts[0]||'').trim();
+          let postcode = '', addrValue = '';
+          if (hasPostcode) { postcode = (parts[1]||'').trim(); addrValue = parts.slice(2).join(',').trim(); }
+          else { addrValue = parts.slice(1).join(',').trim(); }
+          if (!roadName || !addrValue) return;
+
+          let road = roads.find(r => r.name.toLowerCase() === roadName.toLowerCase() && r.locationId === currentLocId);
+          if (!road) {
+            road = {id:uid(),name:roadName,postcode,locationId:currentLocId,tags:[],createdAt:new Date().toISOString()};
+            roads.push(road); _syncCreateRoad(road); newRoads++;
+          }
+          if (!addresses.some(a => a.roadId === road.id && a.address.toLowerCase() === addrValue.toLowerCase())) {
+            const newAddr = {id:uid(),roadId:road.id,address:addrValue};
+            addresses.push(newAddr); _syncCreateAddress(newAddr); newAddresses++;
+          }
+        });
+
+        saveRoads(roads); saveAddresses(addresses); render();
+        showImportFeedback(`Imported ${newRoads} road${newRoads!==1?'s':''} and ${newAddresses} address${newAddresses!==1?'es':''}.`,'success');
+      };
+      reader.onerror = () => showImportFeedback('Could not read file.','error');
+      reader.readAsText(file);
+    }
+
+    /* ── Event Binding ────────────────────────────────────── */
+    function bindStaticEvents() {
+      document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
+
+      document.getElementById('btn-theme-toggle').addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme') || 'dark';
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('rvt_theme', next);
+        document.getElementById('btn-theme-toggle').textContent = next === 'dark' ? '🌙' : '☀️';
+      });
+      // Set correct icon on load
+      const _t = localStorage.getItem('rvt_theme') || 'dark';
+      document.getElementById('btn-theme-toggle').textContent = _t === 'dark' ? '🌙' : '☀️';
+
+      document.getElementById('global-search').addEventListener('input', e => {
+        state.search = e.target.value.trim().toLowerCase();
+        if (state.view === 'places') renderPlaces();
+        else if (state.view === 'roads') renderRoads();
+      });
+
+      document.getElementById('btn-view-grid').addEventListener('click', () => {
+        state.viewMode = 'grid';
+        document.getElementById('btn-view-grid').classList.add('active');
+        document.getElementById('btn-view-list').classList.remove('active');
+        render();
+      });
+      document.getElementById('btn-view-list').addEventListener('click', () => {
+        state.viewMode = 'list';
+        document.getElementById('btn-view-list').classList.add('active');
+        document.getElementById('btn-view-grid').classList.remove('active');
+        render();
+      });
+
+      document.getElementById('csv-file-input').addEventListener('change', function () {
+        if (this.files && this.files[0]) importCSV(this.files[0]);
+      });
+
+      document.getElementById('modal-close').addEventListener('click', closeModal);
+      document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+      // ── Find Location: Search ─────────────────────────────
+      const joinSearchBtn = document.getElementById('join-search-btn');
+      const joinSearchIn  = document.getElementById('join-search-input');
+      if (joinSearchBtn) {
+        async function doJoinSearch() {
+          const q = joinSearchIn.value.trim();
+          if (!q) return;
+          const resultsEl = document.getElementById('join-results');
+          resultsEl.innerHTML = '<div class="osm-status">Searching…</div>';
+
+          // First: search existing locations in localStorage
+          const existing = loadPlaces().filter(p =>
+            p.type === 'location' && p.name.toLowerCase().includes(q.toLowerCase())
+          );
+
+          // Then: search OSM
+          let osmResults = [];
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=5`,
+              { headers: { 'Accept-Language': 'en' } }
+            );
+            osmResults = await res.json();
+          } catch(e) {}
+
+          resultsEl.innerHTML = '';
+          if (!existing.length && !osmResults.length) {
+            resultsEl.innerHTML = '<div class="osm-status">No results found.</div>';
+            return;
+          }
+
+          // Show existing DB locations first
+          existing.forEach(loc => {
+            const row = el('div','join-result-card');
+            row.style.marginBottom = '0.5rem';
+            const info = el('div','join-result-info');
+            info.appendChild(el('div','join-result-name', loc.name));
+            if (loc.address) info.appendChild(el('div','join-result-addr', loc.address));
+            const reqBtn = btn('btn-primary btn-sm','Request Access', () => {
+              const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+              if (reqs.find(r => r.locationId === loc.id)) { alert('You already sent a request for this location.'); return; }
+              const authU = window._rvtAuthUser;
+              reqs.push({ id:uid(), locationId:loc.id, locationName:loc.name, address:loc.address||'', status:'pending', createdAt:new Date().toISOString(), userName: (authU && (authU.name || authU.email)) || '' });
+              localStorage.setItem('rvt_join_requests', JSON.stringify(reqs));
+              alert('Request sent! The admin will review it shortly.');
+              renderMyJoinRequests();
+            });
+            row.appendChild(info); row.appendChild(reqBtn);
+            resultsEl.appendChild(row);
+          });
+
+          // Show OSM results (not already in DB)
+          const existingOsmIds = new Set(loadPlaces().map(p => p.osmPlaceId).filter(Boolean));
+          osmResults.filter(r => !existingOsmIds.has(r.osm_type + r.osm_id)).forEach(item => {
+            const row = el('div','join-result-card');
+            row.style.marginBottom = '0.5rem';
+            const info = el('div','join-result-info');
+            info.appendChild(el('div','join-result-name', item.display_name.split(',')[0]));
+            info.appendChild(el('div','join-result-addr', item.display_name));
+            const addBtn2 = btn('btn-ghost btn-sm','Add & Join', () => {
+              // Add as new location and auto-join
+              const places = loadPlaces();
+              const newPlace = {
+                id: uid(), parentId: null, type:'location', name: item.display_name.split(',')[0],
+                address: item.display_name, lat: parseFloat(item.lat), lng: parseFloat(item.lon),
+                osmPlaceId: item.osm_type + item.osm_id, locationType:'mosque',
+              };
+              places.push(newPlace); savePlaces(places);
+              _syncCreatePlace(newPlace);
+              alert('Location added! You are now the owner.');
+              render();
+            });
+            row.appendChild(info); row.appendChild(addBtn2);
+            resultsEl.appendChild(row);
+          });
+        }
+
+        joinSearchBtn.addEventListener('click', doJoinSearch);
+        joinSearchIn.addEventListener('keydown', e => { if (e.key === 'Enter') doJoinSearch(); });
+      }
+
+      // ── Find Location: Create own workspace ───────────────
+      const createOwnBtn = document.getElementById('btn-create-own');
+      if (createOwnBtn) {
+        createOwnBtn.addEventListener('click', () => {
+          const name = prompt('Enter a name for your private workspace:');
+          if (!name || !name.trim()) return;
+          const places = loadPlaces();
+          places.push({ id:uid(), parentId:null, type:'location', name:name.trim(), locationType:'individual' });
+          savePlaces(places); render();
+        });
+      }
+    }
+
+    /* ── Leaflet Road Location ───────────────────────────── */
+    let _leafletMap = null, _leafletMarker = null, _mapRoadId = null, _pendingLatLng = null;
+
+    function setMapPin(lat, lng) {
+      _pendingLatLng = { lat, lng };
+      const ll = L.latLng(lat, lng);
+      if (_leafletMarker) _leafletMarker.setLatLng(ll);
+      else _leafletMarker = L.marker(ll).addTo(_leafletMap);
+      _leafletMap.setView(ll, 15);
+      document.getElementById('map-coords').textContent =
+        `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+      reverseGeocode(lat, lng);
+    }
+
+    async function reverseGeocode(lat, lng) {
+      const hierEl = document.getElementById('map-hierarchy');
+      hierEl.textContent = 'Looking up location…';
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = await res.json();
+        const a = data.address || {};
+        const country = a.country || '';
+        const city    = a.city || a.town || a.municipality || a.county || '';
+        const town    = a.suburb || a.neighbourhood || a.quarter || a.village || '';
+        const parts   = [country, city, town].filter(Boolean);
+        hierEl.textContent = parts.length ? '📍 ' + parts.join(' › ') : '';
+        // Store hierarchy on pending pin for saving with the road
+        _pendingLatLng.country = country;
+        _pendingLatLng.city    = city;
+        _pendingLatLng.town    = town;
+      } catch(e) {
+        hierEl.textContent = '';
+      }
+    }
+
+    function openMapModal(roadId) {
+      _mapRoadId = roadId;
+      const road  = loadRoads().find(r => r.id === roadId);
+      _pendingLatLng = road?.lat && road?.lng ? { lat: road.lat, lng: road.lng } : null;
+
+      document.getElementById('map-modal').classList.remove('hidden');
+      document.getElementById('map-hierarchy').textContent = '';
+
+      // Init map once
+      if (!_leafletMap) {
+        _leafletMap = L.map('leaflet-map').setView([51.505, -0.09], 13);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 20,
+        }).addTo(_leafletMap);
+        _leafletMap.on('click', e => {
+          setMapPin(e.latlng.lat, e.latlng.lng);
+        });
+      }
+
+      // Place existing pin or centre on GPS
+      if (_pendingLatLng) {
+        const ll = L.latLng(_pendingLatLng.lat, _pendingLatLng.lng);
+        if (_leafletMarker) _leafletMarker.setLatLng(ll);
+        else _leafletMarker = L.marker(ll).addTo(_leafletMap);
+        _leafletMap.setView(ll, 15);
+        document.getElementById('map-coords').textContent =
+          `Lat: ${_pendingLatLng.lat.toFixed(6)}, Lng: ${_pendingLatLng.lng.toFixed(6)}`;
+        reverseGeocode(_pendingLatLng.lat, _pendingLatLng.lng);
+      } else {
+        if (_leafletMarker) { _leafletMarker.remove(); _leafletMarker = null; }
+        document.getElementById('map-coords').textContent = 'Click the map to pin a location';
+        // Centre on GPS silently
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(pos => {
+            _leafletMap.setView([pos.coords.latitude, pos.coords.longitude], 14);
+          });
+        }
+      }
+      setTimeout(() => _leafletMap.invalidateSize(), 50);
+    }
+
+    function closeMapModal() {
+      document.getElementById('map-modal').classList.add('hidden');
+    }
+
+    function saveMapLocation() {
+      if (!_mapRoadId || !_pendingLatLng) { closeMapModal(); return; }
+      const roads = loadRoads();
+      const idx = roads.findIndex(r => r.id === _mapRoadId);
+      if (idx !== -1) {
+        roads[idx].lat     = _pendingLatLng.lat;
+        roads[idx].lng     = _pendingLatLng.lng;
+        roads[idx].country = _pendingLatLng.country || roads[idx].country || '';
+        roads[idx].city    = _pendingLatLng.city    || roads[idx].city    || '';
+        roads[idx].town    = _pendingLatLng.town    || roads[idx].town    || '';
+        saveRoads(roads);
+        _syncUpdateRoad(_mapRoadId, {
+          lat: roads[idx].lat, lng: roads[idx].lng,
+          country: roads[idx].country, city: roads[idx].city, town: roads[idx].town,
+        });
+      }
+      closeMapModal(); render();
+    }
+
+    /* ── Init ─────────────────────────────────────────────── */
+    document.addEventListener('DOMContentLoaded', () => {
+      bindStaticEvents();
+
+      // Map modal events
+      document.getElementById('map-modal-close').addEventListener('click', closeMapModal);
+      document.getElementById('map-save-btn').addEventListener('click', saveMapLocation);
+      document.getElementById('map-clear-btn').addEventListener('click', () => {
+        _pendingLatLng = null;
+        if (_leafletMarker) { _leafletMarker.remove(); _leafletMarker = null; }
+        document.getElementById('map-coords').textContent = 'Click the map to pin a location';
+        document.getElementById('map-hierarchy').textContent = '';
+      });
+      document.getElementById('map-gps-btn').addEventListener('click', () => {
+        if (!navigator.geolocation) { alert('Geolocation is not supported by your browser.'); return; }
+        const btn = document.getElementById('map-gps-btn');
+        btn.textContent = '⏳ Getting location…';
+        btn.disabled = true;
+        navigator.geolocation.getCurrentPosition(
+          pos => {
+            btn.textContent = '📍 Use My GPS'; btn.disabled = false;
+            setMapPin(pos.coords.latitude, pos.coords.longitude);
+          },
+          () => { btn.textContent = '📍 Use My GPS'; btn.disabled = false; alert('Could not get your location. Please allow location access.'); }
+        );
+      });
+
+      // render() is called by initCache() in the module script after data loads
+    });
+
+    // ── Expose to module script ────────────────────────────────
+    window._rvtCache      = _cache;
+    window._rvtRender     = render;
+    window._rvtShowToast  = _showToast;
+
+    // ── Join invite processor (Phase 7 — localStorage invite, kept for backwards compat) ──
+    window._rvtProcessJoin = function(token) {
+      try {
+        const locData = JSON.parse(decodeURIComponent(escape(atob(token))));
+        const places = loadPlaces();
+        if (!places.find(p => p.id === locData.id)) {
+          const newPlace = { ...locData, type: 'location', joinedAt: new Date().toISOString() };
+          places.push(newPlace); savePlaces(places);
+          render();
+        }
+        localStorage.removeItem('rvt_pending_join');
+        _showToast('✓ Joined "' + locData.name + '"!');
+      } catch(e) {
+        localStorage.removeItem('rvt_pending_join');
+      }
+    };
+
+  }());
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"
+          integrity="sha384-rwykjmWNwVxboyFmvK9OXN0wj9hnMHA2aAHtits54DuACyCq0M2PrSNxhRb+hvXT"
+          crossorigin="anonymous"></script>
+  <script type="module">
+    import { Auth, db, Locations, Roads, Tags, TagAssignments, Settings } from './supabase-client-v2.js';
+
+    // ── Auth guard ───────────────────────────────────────────
+    const { data: { session } } = await db.auth.getSession();
+    if (!session) {
+      window.location.replace('login-v2.html');
+    } else {
+      const email    = session.user.email || '';
+      const fullName = session.user.user_metadata?.full_name || '';
+      document.getElementById('user-email').textContent = fullName || email;
+      window._rvtAuthUser = { name: fullName, email };
+
+      // Expose db + userId so IIFE sync helpers can use them
+      window._rvtDb     = db;
+      window._rvtUserId = session.user.id;
+
+      // Load all data then render
+      await initCache();
+
+      // Process pending join invite (Phase 7 backwards compat)
+      const pendingJoin = localStorage.getItem('rvt_pending_join');
+      if (pendingJoin && typeof window._rvtProcessJoin === 'function') {
+        window._rvtProcessJoin(pendingJoin);
+      }
+    }
+
+    // ── Sign out ─────────────────────────────────────────────
+    document.getElementById('btn-signout').addEventListener('click', async () => {
+      await Auth.signOut();
+      window.location.replace('login-v2.html');
+    });
+
+    // ── Session expiry ───────────────────────────────────────
+    db.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') window.location.replace('login-v2.html');
+    });
+
+    // ── DB row → app object mappers ──────────────────────────
+    function mapDbPlace(r) {
+      return {
+        id: r.id, name: r.name, type: r.type,
+        locationType:      r.location_type,
+        locationTypeLabel: r.location_type_label,
+        country:  r.country  || '',
+        city:     r.city     || '',
+        town:     r.town     || '',
+        lat:      r.lat,      lng: r.lng,
+        osmPlaceId: r.osm_place_id,
+        address:  r.address  || '',
+        parentId: r.parent_id,
+        orgId:    r.org_id,
+        ownerId:  r.owner_id,
+        createdAt: r.created_at,
+      };
+    }
+    function mapDbRoad(r) {
+      return {
+        id: r.id, name: r.name,
+        postcode:   r.postcode  || '',
+        locationId: r.location_id,
+        lat: r.lat, lng: r.lng,
+        country: r.country || '', city: r.city || '', town: r.town || '',
+        createdAt: r.created_at,
+        tags: [],  // populated from tag assignments below
+      };
+    }
+    function mapDbAddress(r) {
+      return { id: r.id, roadId: r.road_id, address: r.address };
+    }
+    function mapDbVisit(r) {
+      // Merge outcome + notes (stored separately in DB, combined in UI)
+      const outcomeText = [r.outcome, r.notes].filter(Boolean).join(' — ');
+      return {
+        id: r.id, addressId: r.address_id,
+        outcome:   outcomeText,
+        timestamp: r.visited_at,
+        enteredBy: r.entered_by_name || '',
+      };
+    }
+    function mapDbTag(r) {
+      return { id: r.id, locationId: r.location_id, name: r.name, color: r.color };
+    }
+
+    // ── Cache initialiser ────────────────────────────────────
+    async function initCache() {
+      const overlay = document.getElementById('loading-overlay');
+      if (overlay) overlay.style.display = 'flex';
+
+      try {
+        const cache = window._rvtCache;
+
+        // 1. Locations
+        const dbLocs = await Locations.getMyLocations();
+        cache.places = dbLocs.map(mapDbPlace);
+        const locIds = dbLocs.map(l => l.id);
+
+        if (locIds.length) {
+          // 2. Roads (parallel per location)
+          const roadArrays = await Promise.all(locIds.map(id => Roads.getByLocation(id)));
+          const allDbRoads = roadArrays.flat();
+          cache.roads = allDbRoads.map(mapDbRoad);
+          const roadIds = allDbRoads.map(r => r.id);
+
+          if (roadIds.length) {
+            // 3. Addresses
+            const { data: addrData } = await db
+              .from('addresses').select('*')
+              .in('road_id', roadIds).is('deleted_at', null);
+            cache.addresses = (addrData || []).map(mapDbAddress);
+
+            // 4. Visits (need address IDs first)
+            const addrIds = (addrData || []).map(a => a.id);
+            if (addrIds.length) {
+              const { data: visitData } = await db
+                .from('visits').select('*')
+                .in('address_id', addrIds)
+                .is('deleted_at', null)
+                .order('visited_at', { ascending: false });
+              cache.visits = (visitData || []).map(mapDbVisit);
+            }
+          }
+
+          // 4. Tags + assignments (parallel per location)
+          const [tagArrays, assignArrays] = await Promise.all([
+            Promise.all(locIds.map(id => Tags.list(id))),
+            Promise.all(locIds.map(id => TagAssignments.getByLocation(id))),
+          ]);
+
+          cache.tags = {};
+          tagArrays.forEach((tags, i) => {
+            cache.tags[locIds[i]] = tags.map(mapDbTag);
+          });
+
+          const assignByRoad = {};
+          assignArrays.flat().forEach(a => {
+            if (!assignByRoad[a.road_id]) assignByRoad[a.road_id] = [];
+            assignByRoad[a.road_id].push(a.tag_id);
+          });
+          cache.roads.forEach(r => { r.tags = assignByRoad[r.id] || []; });
+        }
+
+        // 5. Settings (display name + outcomes from profiles.preferences)
+        const settingsData = await Settings.get();
+        const prefs = settingsData?.preferences || {};
+        if (prefs.outcomes?.length) cache.outcomes = prefs.outcomes;
+        cache.settings = {
+          currentUser: settingsData?.full_name || window._rvtAuthUser?.name || '',
+        };
+
+      } catch (e) {
+        console.error('initCache failed:', e);
+        if (window._rvtShowToast) window._rvtShowToast('Could not load data — please refresh.', true);
+      }
+
+      if (overlay) overlay.style.display = 'none';
+      if (window._rvtRender) window._rvtRender();
+    }
+  </script>
+
+  <!-- Loading overlay — shown during initCache, hidden once data is ready -->
+  <div id="loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(10,10,10,0.93);flex-direction:column;align-items:center;justify-content:center;z-index:9999;">
+    <div style="color:var(--gold);font-size:1.05rem;margin-bottom:1.1rem;font-family:Georgia,serif;letter-spacing:0.05em;">Loading your data…</div>
+    <div style="width:36px;height:36px;border:3px solid rgba(201,168,76,0.2);border-top-color:var(--gold);border-radius:50%;animation:rvt-spin 0.8s linear infinite;"></div>
+  </div>
+  <style>@keyframes rvt-spin{to{transform:rotate(360deg)}}</style>
+</body>
+</html>

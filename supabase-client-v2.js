@@ -988,4 +988,281 @@ const JoinRequests = {
 };
 
 
-export { db, Auth, Places, Roads, Addresses, Visits, Shares, Outcomes, Realtime, Locations, JoinRequests };
+/* ================================================================
+   TAGS  (Phase 5)
+   ================================================================ */
+
+const Tags = {
+
+  async list(locationId) {
+    const { data, error } = await db
+      .from('road_tags')
+      .select('*')
+      .eq('location_id', locationId)
+      .is('deleted_at', null)
+      .order('created_at');
+    if (error) throw error;
+    return data || [];
+  },
+
+  async create(locationId, name, color = '#C9A84C') {
+    const user = await Auth.getUser();
+    const { data, error } = await db
+      .from('road_tags')
+      .insert({ location_id: locationId, name, color, owner_id: user.id })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  async softDelete(tagId) {
+    const { error } = await db
+      .from('road_tags')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', tagId);
+    if (error) throw error;
+  },
+};
+
+
+/* ================================================================
+   TAG ASSIGNMENTS  (Phase 5)
+   ================================================================ */
+
+const TagAssignments = {
+
+  /** Get all tag IDs assigned to a road */
+  async getByRoad(roadId) {
+    const { data, error } = await db
+      .from('road_tag_assignments')
+      .select('tag_id')
+      .eq('road_id', roadId);
+    if (error) throw error;
+    return (data || []).map(r => r.tag_id);
+  },
+
+  /** Get all assignments for all roads in a location (bulk load for cache) */
+  async getByLocation(locationId) {
+    const { data, error } = await db
+      .from('road_tag_assignments')
+      .select('road_id, tag_id, roads!road_id(location_id)')
+      .eq('roads.location_id', locationId);
+    if (error) throw error;
+    return data || [];
+  },
+
+  /** Replace all tag assignments for a road atomically */
+  async set(roadId, tagIds) {
+    // Delete existing assignments then insert new ones
+    const { error: delErr } = await db
+      .from('road_tag_assignments')
+      .delete()
+      .eq('road_id', roadId);
+    if (delErr) throw delErr;
+
+    if (!tagIds.length) return;
+
+    const rows = tagIds.map(tag_id => ({ road_id: roadId, tag_id }));
+    const { error: insErr } = await db
+      .from('road_tag_assignments')
+      .insert(rows);
+    if (insErr) throw insErr;
+  },
+};
+
+
+/* ================================================================
+   SETTINGS  (Phase 5)
+   Stored in profiles.preferences JSONB
+   ================================================================ */
+
+const Settings = {
+
+  async get() {
+    const user = await Auth.getUser();
+    if (!user) return {};
+    const { data, error } = await db
+      .from('profiles')
+      .select('preferences, full_name')
+      .eq('id', user.id)
+      .single();
+    if (error) throw error;
+    return data || {};
+  },
+
+  async save(updates) {
+    const user = await Auth.getUser();
+    if (!user) return;
+    // Merge into existing preferences
+    const { data: current } = await db
+      .from('profiles')
+      .select('preferences')
+      .eq('id', user.id)
+      .single();
+    const merged = { ...(current?.preferences || {}), ...updates.preferences };
+    const { error } = await db
+      .from('profiles')
+      .update({
+        preferences: merged,
+        ...(updates.full_name !== undefined ? { full_name: updates.full_name } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
+    if (error) throw error;
+  },
+};
+
+
+/* ================================================================
+   LOCATION CRUD  (Phase 5 additions to Locations)
+   ================================================================ */
+
+Object.assign(Locations, {
+
+  /** Create a new location place */
+  async create({ name, locationType, locationTypeLabel, country, city, town, lat, lng, osmPlaceId, address }) {
+    const user = await Auth.getUser();
+    const { data, error } = await db
+      .from('places')
+      .insert({
+        type:                 'location',
+        name,
+        location_type:        locationType,
+        location_type_label:  locationTypeLabel || null,
+        country:              country || null,
+        city:                 city || null,
+        town:                 town || null,
+        lat:                  lat || null,
+        lng:                  lng || null,
+        osm_place_id:         osmPlaceId || null,
+        address:              address || null,
+        owner_id:             user.id,
+        created_by:           user.id,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  /** Update a location */
+  async updateLocation(id, updates) {
+    const { data, error } = await db
+      .from('places')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  /** Soft delete a location and all its roads/addresses/visits */
+  async deleteLocation(id) {
+    const { error } = await db
+      .from('places')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
+  },
+});
+
+
+/* ================================================================
+   ROAD CRUD  (Phase 5 additions to Roads)
+   ================================================================ */
+
+Object.assign(Roads, {
+
+  /** Get all roads for a location */
+  async getByLocation(locationId) {
+    const { data, error } = await db
+      .from('roads')
+      .select('*')
+      .eq('location_id', locationId)
+      .is('deleted_at', null)
+      .order('name');
+    if (error) throw error;
+    return data || [];
+  },
+
+  /** Get ungrouped roads (no location_id) for the current user */
+  async getUngroupedByUser() {
+    const user = await Auth.getUser();
+    const { data, error } = await db
+      .from('roads')
+      .select('*')
+      .is('location_id', null)
+      .eq('owner_id', user.id)
+      .is('deleted_at', null)
+      .order('name');
+    if (error) throw error;
+    return data || [];
+  },
+
+  /** Create a road linked to a location */
+  async createForLocation({ name, postcode = '', locationId = null, lat, lng, country, city, town }) {
+    const user = await Auth.getUser();
+    const { data, error } = await db
+      .from('roads')
+      .insert({
+        name,
+        postcode:    postcode || null,
+        location_id: locationId || null,
+        lat:         lat  || null,
+        lng:         lng  || null,
+        country:     country || null,
+        city:        city    || null,
+        town:        town    || null,
+        owner_id:    user.id,
+        created_by:  user.id,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+});
+
+
+/* ================================================================
+   ADDRESS CRUD  (Phase 5 additions to Addresses)
+   ================================================================ */
+
+Object.assign(Addresses, {
+
+  /** Get all addresses for all roads in a location (bulk load) */
+  async getByLocation(locationId) {
+    const { data, error } = await db
+      .from('addresses')
+      .select('*, roads!road_id(location_id)')
+      .eq('roads.location_id', locationId)
+      .is('deleted_at', null);
+    if (error) throw error;
+    return data || [];
+  },
+});
+
+
+/* ================================================================
+   VISIT BULK LOAD  (Phase 5 additions to Visits)
+   ================================================================ */
+
+Object.assign(Visits, {
+
+  /** Get all visits for all addresses in a location (bulk load for cache) */
+  async getByLocation(locationId) {
+    const { data, error } = await db
+      .from('visits')
+      .select('*, addresses!address_id(road_id, roads!road_id(location_id))')
+      .eq('addresses.roads.location_id', locationId)
+      .is('deleted_at', null)
+      .order('visited_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  },
+});
+
+
+export { db, Auth, Places, Roads, Addresses, Visits, Shares, Outcomes, Realtime, Locations, JoinRequests, Tags, TagAssignments, Settings };
