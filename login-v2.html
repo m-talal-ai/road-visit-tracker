@@ -274,12 +274,12 @@
 
   // ── If already signed in, go straight to the app ────────────
   const { data: { session } } = await db.auth.getSession();
-  if (session) window.location.replace('index-v2.html');
+  if (session) window.location.replace('index-v3.html');
 
   // ── After OAuth redirect, Supabase detects token in URL ──────
   db.auth.onAuthStateChange((event, session) => {
     if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session) {
-      window.location.replace('index-v2.html');
+      window.location.replace('index-v3.html');
     }
   });
 
