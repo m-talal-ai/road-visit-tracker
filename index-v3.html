@@ -79,6 +79,8 @@
     .vtbtn.active { background:var(--gold-subtle); border-color:var(--border-hover); color:var(--gold); }
     .settings-btn { background:transparent; border:1px solid var(--border); color:var(--text-muted); border-radius:var(--radius); padding:0.3rem 0.5rem; font-size:1rem; transition:all var(--transition); flex-shrink:0; }
     .settings-btn:hover { border-color:var(--gold); color:var(--gold); }
+    .location-selector { background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:0.82rem; padding:0.3rem 0.5rem; max-width:180px; cursor:pointer; flex-shrink:0; }
+    .location-selector:focus { outline:none; border-color:var(--gold); }
     .user-pill { display:flex; align-items:center; gap:0.5rem; flex-shrink:0; }
     .user-email { font-size:0.75rem; color:var(--text-muted); max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .signout-btn { background:transparent; border:1px solid var(--border); color:var(--text-muted); border-radius:var(--radius); padding:0.3rem 0.6rem; font-size:0.75rem; transition:all var(--transition); flex-shrink:0; }
@@ -317,6 +319,10 @@
 
   <header class="app-header">
     <h1 class="app-title">Road Visits</h1>
+    <div class="header-divider"></div>
+    <select id="location-selector" class="location-selector" title="Switch location">
+      <option value="">Select location…</option>
+    </select>
     <div class="header-divider"></div>
     <nav id="breadcrumb" class="breadcrumb" aria-label="Navigation"></nav>
     <input type="search" id="global-search" class="header-search" placeholder="Search...">
@@ -1304,21 +1310,39 @@
     /* ── Master Render ────────────────────────────────────── */
     function render() {
       updateBreadcrumb();
+
+      // Keep find-location section permanently hidden — replaced by header dropdown
       const findLocEl = document.getElementById('view-find-location');
+      if (findLocEl) findLocEl.classList.add('hidden');
 
-      // If user has no location yet, show the "Find your location" screen
-      const locations = loadPlaces().filter(p => p.type === 'location');
-      const showFindLocation = locations.length === 0 && state.view === 'places';
-
-      findLocEl.classList.toggle('hidden', !showFindLocation);
-      document.getElementById('view-places').classList.toggle('hidden',    state.view !== 'places' || showFindLocation);
+      document.getElementById('view-places').classList.toggle('hidden',    state.view !== 'places');
       document.getElementById('view-roads').classList.toggle('hidden',     state.view !== 'roads');
       document.getElementById('view-addresses').classList.toggle('hidden', state.view !== 'addresses');
 
-      if (showFindLocation)            renderFindLocation();
-      else if (state.view === 'places')    renderPlaces();
+      if (state.view === 'places')    renderPlaces();
       else if (state.view === 'roads') renderRoads();
       else                             renderAddresses();
+
+      // Populate header location selector
+      const sel = document.getElementById('location-selector');
+      if (sel) {
+        const locs = loadPlaces().filter(p => p.type === 'location');
+        sel.innerHTML = '';
+        if (locs.length > 1) {
+          sel.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: 'All Locations' }));
+        }
+        locs.forEach(loc => {
+          const opt = document.createElement('option');
+          opt.value = loc.id;
+          opt.textContent = loc.name;
+          if (loc.id === state.currentLocationId) opt.selected = true;
+          sel.appendChild(opt);
+        });
+        if (!locs.length) {
+          sel.appendChild(Object.assign(document.createElement('option'), { value: '', textContent: 'No locations yet' }));
+        }
+        sel.style.display = locs.length ? '' : 'none';
+      }
     }
 
     /* ── Find Location Screen ────────────────────────────── */
@@ -1724,7 +1748,7 @@
           address:           location.address || '',
         };
         const joinToken  = btoa(unescape(encodeURIComponent(JSON.stringify(locSnapshot))));
-        const loginBase  = window.location.href.replace('index-v2.html', 'login-v2.html').split('?')[0];
+        const loginBase  = window.location.origin + window.location.pathname.replace(/[^/]*$/, 'login-v2.html');
         const joinUrl    = loginBase + '?join=' + joinToken;
 
         const inviteRow = el('div','settings-add-row');
@@ -2374,6 +2398,17 @@
 
     /* ── Event Binding ────────────────────────────────────── */
     function bindStaticEvents() {
+      // Location selector dropdown
+      document.getElementById('location-selector').addEventListener('change', function() {
+        const id = this.value;
+        if (!id) {
+          navigateToRoot();
+        } else {
+          const place = loadPlaces().find(p => p.id === id);
+          if (place) navigateIntoPlace(place);
+        }
+      });
+
       document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
 
       document.getElementById('btn-theme-toggle').addEventListener('click', () => {
@@ -2694,6 +2729,13 @@
       window._rvtDb     = db;
       window._rvtUserId = session.user.id;
 
+      // Capture join token from URL (already-logged-in users land here directly)
+      const urlJoin = new URLSearchParams(window.location.search).get('join');
+      if (urlJoin) {
+        localStorage.setItem('rvt_pending_join', urlJoin);
+        history.replaceState(null, '', window.location.pathname);
+      }
+
       // Load all data then render
       await initCache();
 
@@ -2703,20 +2745,15 @@
         localStorage.removeItem('rvt_pending_join');
         try {
           const locData = JSON.parse(decodeURIComponent(escape(atob(pendingJoin))));
-          if (locData.orgId) {
-            // New-style token: join via Supabase org membership
-            const { error } = await db.rpc('fn_join_location', { p_org_id: locData.orgId });
-            if (error) throw error;
-            // Reload cache — user is now a member and can see the location's data
-            await initCache();
-            if (window._rvtShowToast) window._rvtShowToast('✓ Joined "' + locData.name + '"!');
-            // Navigate straight to the joined location's roads view
-            const joined = window._rvtCache?.places?.find(p => p.orgId === locData.orgId);
-            if (joined && window._rvtOpenLocation) window._rvtOpenLocation(joined.id);
-          } else {
-            // Legacy token (no orgId): add to local cache only
-            if (typeof window._rvtProcessJoin === 'function') window._rvtProcessJoin(pendingJoin);
-          }
+          // Use place id — fn_join_location now accepts place_id and creates org if needed
+          const { error } = await db.rpc('fn_join_location', { p_place_id: locData.id });
+          if (error) throw error;
+          // Reload cache — user is now a member and can see the location's data
+          await initCache();
+          if (window._rvtShowToast) window._rvtShowToast('✓ Joined "' + locData.name + '"!');
+          // Navigate straight to the joined location's roads view
+          const joined = window._rvtCache?.places?.find(p => p.id === locData.id);
+          if (joined && window._rvtOpenLocation) window._rvtOpenLocation(joined.id);
         } catch(e) {
           if (window._rvtShowToast) window._rvtShowToast('Could not join location: ' + (e.message || 'unknown error'), true);
         }
