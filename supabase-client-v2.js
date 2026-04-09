@@ -11,8 +11,11 @@
  * =====================================================================
  */
 
- const SUPABASE_URL  = 'https://jgszaeehjtoawacbzwgo.supabase.co';
- const SUPABASE_ANON = 'sb_publishable__7MIT74nTfMsVpD4wz5Muw_eXFh9SXv';
+// SAFE TO COMMIT: Supabase anon key is a *publishable* key designed for client-side use.
+// Security is enforced by Row Level Security (RLS) on every table — NOT by hiding this key.
+// NEVER add the service_role key here. That key must stay server-side only.
+const SUPABASE_URL  = 'https://jgszaeehjtoawacbzwgo.supabase.co';
+const SUPABASE_ANON = 'sb_publishable__7MIT74nTfMsVpD4wz5Muw_eXFh9SXv';
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
   auth: {
@@ -254,11 +257,13 @@ const Roads = {
 
   /** Full-text search across all accessible roads (name + postcode) */
   async search(query) {
+    // Strip PostgREST filter DSL structural characters to prevent filter injection
+    const safe = query.replace(/[,%()]/g, '');
     const { data, error } = await db
       .from('roads')
       .select('*')
       .is('deleted_at', null)
-      .or(`name.ilike.%${query}%,postcode.ilike.%${query}%`)
+      .or(`name.ilike.%${safe}%,postcode.ilike.%${safe}%`)
       .order('name')
       .limit(30);
     if (error) throw error;
@@ -398,12 +403,18 @@ const Addresses = {
       try {
         const record = { road_id: roadId, owner_id: user.id, created_by: user.id, metadata: {} };
 
+        const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
         Object.entries(columnMapping).forEach(([colIdx, fieldPath]) => {
+          // Block prototype pollution
+          if (DANGEROUS_KEYS.has(fieldPath) || fieldPath.startsWith('__')) return;
+
           const value = (row[parseInt(colIdx)] || '').trim();
           if (!value) return;
 
           if (fieldPath.startsWith('metadata.')) {
             const key = fieldPath.replace('metadata.', '');
+            if (DANGEROUS_KEYS.has(key) || key.startsWith('__')) return;
             record.metadata[key] = value;
           } else {
             record[fieldPath] = value;
@@ -615,23 +626,21 @@ const Shares = {
 
   /**
    * Look up a guest share token (called on the /shared/:token page).
-   * Increments use_count.
+   * Increments use_count atomically via RPC to prevent TOCTOU race condition.
+   *
+   * Requires fn_resolve_share_token() in schema/06_security_fixes.sql to be
+   * run in Supabase SQL editor before this works in production.
    */
   async resolveGuestToken(token) {
     const { data, error } = await db
-      .from('shares')
-      .select('*, places(*), roads(*)')
-      .eq('share_token', token)
-      .is('deleted_at', null)
-      .is('revoked_at', null)
-      .maybeSingle();
+      .rpc('fn_resolve_share_token', { p_token: token })
+      .single();
 
-    if (error || !data) throw new Error('Share link not found or has expired.');
-    if (data.expires_at && new Date(data.expires_at) < new Date()) throw new Error('This share link has expired.');
-    if (data.max_uses !== null && data.use_count >= data.max_uses) throw new Error('This share link has reached its use limit.');
-
-    // Increment use count
-    await db.from('shares').update({ use_count: data.use_count + 1 }).eq('id', data.id);
+    if (error) {
+      if (error.message.includes('expired'))      throw new Error('This share link has expired.');
+      if (error.message.includes('limit_reached')) throw new Error('This share link has reached its use limit.');
+      throw new Error('Share link not found or has expired.');
+    }
     return data;
   },
 };

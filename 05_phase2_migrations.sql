@@ -88,36 +88,24 @@ ALTER TABLE organization_members ADD CONSTRAINT organization_members_role_check
 CREATE OR REPLACE FUNCTION fn_handle_location_created()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public
-AS $$
+AS $func$
 DECLARE
   v_org_id UUID;
   v_slug   TEXT;
 BEGIN
-  -- Only act on location-type places
   IF NEW.type <> 'location' THEN RETURN NEW; END IF;
-
-  -- Individual workspaces: no shared org needed
   IF NEW.location_type = 'individual' THEN RETURN NEW; END IF;
-
-  -- Build a URL-safe slug from the location name + first 8 chars of UUID
   v_slug := lower(regexp_replace(NEW.name, '[^a-zA-Z0-9]+', '-', 'g'))
             || '-' || substr(NEW.id::text, 1, 8);
-
-  -- Create the organization
   INSERT INTO organizations (name, slug, owner_id, place_id)
   VALUES (NEW.name, v_slug, NEW.created_by, NEW.id)
   RETURNING id INTO v_org_id;
-
-  -- Make the creator the owner
   INSERT INTO organization_members (org_id, user_id, role)
   VALUES (v_org_id, NEW.created_by, 'owner');
-
-  -- Link the org back to the place
   UPDATE places SET org_id = v_org_id WHERE id = NEW.id;
-
   RETURN NEW;
 END;
-$$;
+$func$;
 
 DROP TRIGGER IF EXISTS trg_location_created ON places;
 CREATE TRIGGER trg_location_created
@@ -207,6 +195,7 @@ CREATE POLICY "places_update" ON places FOR UPDATE USING (
 -- =============================================================
 
 -- Users can see their own requests; org admins can see requests for their org
+DROP POLICY IF EXISTS "join_req_select" ON mosque_join_requests;
 CREATE POLICY "join_req_select" ON mosque_join_requests FOR SELECT USING (
   user_id = auth.uid()
   OR is_admin()
@@ -220,11 +209,13 @@ CREATE POLICY "join_req_select" ON mosque_join_requests FOR SELECT USING (
 );
 
 -- Users can only submit a request for themselves
+DROP POLICY IF EXISTS "join_req_insert" ON mosque_join_requests;
 CREATE POLICY "join_req_insert" ON mosque_join_requests FOR INSERT WITH CHECK (
   user_id = auth.uid()
 );
 
 -- Only org admins (or platform admin) can approve/reject
+DROP POLICY IF EXISTS "join_req_update" ON mosque_join_requests;
 CREATE POLICY "join_req_update" ON mosque_join_requests FOR UPDATE USING (
   is_admin()
   OR EXISTS (

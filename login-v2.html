@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' data:; font-src 'self'; frame-ancestors 'none';">
   <title>Sign In — Road Visit Tracker</title>
   <style>
     :root {
@@ -243,11 +244,33 @@
   </button>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"
+        integrity="sha384-rwykjmWNwVxboyFmvK9OXN0wj9hnMHA2aAHtits54DuACyCq0M2PrSNxhRb+hvXT"
+        crossorigin="anonymous"></script>
 <script type="module">
   import { Auth, db } from './supabase-client-v2.js';
 
   const REDIRECT_URL = 'https://m-talal-ai.github.io/road-visit-tracker/login-v2.html';
+
+  // ── Detect invite join token in URL ─────────────────────────
+  const _joinToken = new URLSearchParams(window.location.search).get('join');
+  if (_joinToken) {
+    try {
+      const _locData = JSON.parse(decodeURIComponent(escape(atob(_joinToken))));
+      // Store token so index-v2 can process it after auth
+      localStorage.setItem('rvt_pending_join', _joinToken);
+      // Show invite banner above the tabs
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:rgba(201,168,76,0.12);border:1px solid var(--gold-dim);border-radius:var(--radius);padding:0.7rem 1rem;margin-bottom:1.1rem;font-size:0.85rem;color:var(--gold);text-align:center;line-height:1.5;';
+      banner.innerHTML = '🔗 You\'ve been invited to join<br><strong>' + _locData.name + '</strong><br><span style="font-size:0.75rem;opacity:0.75">Sign in or create an account below to accept</span>';
+      const card = document.querySelector('.card');
+      const tabs = card.querySelector('.tabs');
+      card.insertBefore(banner, tabs);
+      // Default to sign-up tab since they likely don't have an account
+      const signupTab = document.querySelector('[data-tab="signup"]');
+      if (signupTab) signupTab.click();
+    } catch(e) {}
+  }
 
   // ── If already signed in, go straight to the app ────────────
   const { data: { session } } = await db.auth.getSession();
@@ -310,8 +333,8 @@
     const label    = mode === 'signin' ? 'Sign In' : 'Create Account';
 
     if (!email || !password) { showError('Please enter your email and password.'); return; }
-    if (mode === 'signup' && password.length < 6) {
-      showError('Password must be at least 6 characters.');
+    if (mode === 'signup' && password.length < 8) {
+      showError('Password must be at least 8 characters.');
       return;
     }
 

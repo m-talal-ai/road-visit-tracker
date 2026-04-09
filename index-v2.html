@@ -4,9 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#0a0a0a">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://nominatim.openstreetmap.org; img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com; font-src 'self'; frame-ancestors 'none';">
   <title>Road Visit Tracker</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H"
+        crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"
+          crossorigin="anonymous"></script>
   <style>
     /* ── Custom Properties ─────────────────────────────────── */
     :root {
@@ -361,10 +366,12 @@
       </div>
       <div id="leaflet-map"></div>
       <div class="map-modal-footer">
-        <span id="map-coords" class="map-coords">No location set</span>
+        <span id="map-coords" class="map-coords">Click the map to pin a location</span>
+        <button id="map-gps-btn" class="btn btn-ghost btn-sm">📍 Use My GPS</button>
         <button id="map-clear-btn" class="btn btn-ghost btn-sm">Clear</button>
         <button id="map-save-btn" class="btn btn-primary btn-sm">Save Location</button>
       </div>
+      <div id="map-hierarchy" style="padding:0.4rem 1.1rem 0.6rem;font-size:0.75rem;color:var(--gold-dim);min-height:1.4rem;"></div>
     </div>
   </div>
 
@@ -397,9 +404,10 @@
     const DEFAULT_OUTCOMES = ['No Answer','Left Leaflet','Interested','Not Interested','Called Back','Moved Away','Revisit Needed','Declined'];
 
     /* ── Constants ────────────────────────────────────────── */
-    const CHILD_TYPE  = { root:'country', country:'city', city:'town', town:'location' };
-    const TYPE_LABEL  = { country:'Country', city:'City', town:'Town', location:'Location' };
-    const TYPE_PLURAL = { country:'Countries', city:'Cities', town:'Towns', location:'Locations' };
+    // Root shows Locations directly. Country/City/Town are labels on locations, not nav layers.
+    const CHILD_TYPE  = { root:'location' };
+    const TYPE_LABEL  = { location:'Location' };
+    const TYPE_PLURAL = { location:'Locations' };
 
     /* ── Storage Layer ────────────────────────────────────── */
     function loadRoads()      { return JSON.parse(localStorage.getItem(KEY_ROADS)     || '[]'); }
@@ -544,8 +552,7 @@
       return loadPlaces().filter(x => x.parentId === placeId).length;
     }
     function childLabel(placeType) {
-      const ct = CHILD_TYPE[placeType || 'root'];
-      return ct ? TYPE_PLURAL[ct] : 'Roads';
+      return placeType === 'location' ? 'Roads' : 'Locations';
     }
     function getAllDescendantPlaceIds(placeId) {
       const all = loadPlaces();
@@ -619,6 +626,12 @@
 
       const acts = document.createElement('div');
       acts.className = 'card-actions';
+      if (place.type === 'location') {
+        const shareBtn = document.createElement('button');
+        shareBtn.className = 'icon-btn'; shareBtn.title = 'Invite / Manage Members'; shareBtn.textContent = '👥';
+        shareBtn.addEventListener('click', e => { e.stopPropagation(); openMembersModal(place.id); });
+        acts.appendChild(shareBtn);
+      }
       const editBtn = document.createElement('button');
       editBtn.className = 'icon-btn'; editBtn.title = 'Edit'; editBtn.textContent = '✏';
       editBtn.addEventListener('click', e => { e.stopPropagation(); openEditPlaceModal(place.id); });
@@ -633,22 +646,25 @@
       sub.className = 'card-sub';
 
       if (place.type === 'location') {
-        // Show location type label + address snippet
+        // Show location type label
         const typeLabel = place.locationType === 'mosque' ? '🕌 Mosque'
           : place.locationType === 'individual' ? '👤 Individual'
           : (place.locationTypeLabel || '📍 Location');
         sub.textContent = typeLabel;
-        if (place.address) {
-          const addrEl = document.createElement('div');
-          addrEl.className = 'card-sub';
-          addrEl.style.fontSize = '0.7rem';
-          addrEl.textContent = place.address.split(',').slice(1, 3).join(',').trim();
-          card.appendChild(top); card.appendChild(sub); card.appendChild(addrEl);
+        // Show country · city · town hierarchy
+        const hier = [place.country, place.city, place.town].filter(Boolean).join(' · ');
+        if (hier) {
+          const hierEl = document.createElement('div');
+          hierEl.className = 'card-sub';
+          hierEl.style.fontSize = '0.7rem';
+          hierEl.style.color = 'var(--gold-dim)';
+          hierEl.textContent = hier;
+          card.appendChild(top); card.appendChild(sub); card.appendChild(hierEl);
           card.addEventListener('click', () => navigateIntoPlace(place));
           return card;
         }
       } else {
-        sub.textContent = count + ' ' + childLabel(place.type).toLowerCase();
+        sub.textContent = count + ' ' + (TYPE_PLURAL['location'] || 'Locations').toLowerCase();
       }
 
       card.appendChild(top); card.appendChild(sub);
@@ -672,10 +688,19 @@
 
       const sub = document.createElement('div');
       sub.className = 'list-sub';
-      sub.textContent = count + ' ' + childLabel(place.type).toLowerCase();
+      const hier = place.type === 'location'
+        ? [place.country, place.city, place.town].filter(Boolean).join(' · ')
+        : count + ' ' + (TYPE_PLURAL['location'] || 'locations').toLowerCase();
+      sub.textContent = hier || (count + ' roads');
 
       const acts = document.createElement('div');
       acts.className = 'list-actions';
+      if (place.type === 'location') {
+        const shareBtn = document.createElement('button');
+        shareBtn.className = 'icon-btn'; shareBtn.title = 'Invite / Manage Members'; shareBtn.textContent = '👥';
+        shareBtn.addEventListener('click', e => { e.stopPropagation(); openMembersModal(place.id); });
+        acts.appendChild(shareBtn);
+      }
       const editBtn = document.createElement('button');
       editBtn.className = 'icon-btn'; editBtn.title = 'Edit'; editBtn.textContent = '✏';
       editBtn.addEventListener('click', e => { e.stopPropagation(); openEditPlaceModal(place.id); });
@@ -727,8 +752,9 @@
       top.appendChild(nameWrap); top.appendChild(acts);
       const sub = document.createElement('div');
       sub.className = 'card-sub';
+      const locHier = road.lat ? [road.country, road.city, road.town].filter(Boolean).join(' · ') : '';
       sub.textContent = (addrCount === 1 ? '1 address' : addrCount + ' addresses')
-        + (road.lat ? ' · 📍 location set' : '');
+        + (locHier ? ' · 📍 ' + locHier : (road.lat ? ' · 📍 location set' : ''));
 
       card.appendChild(top); card.appendChild(sub);
       card.addEventListener('click', () => navigateIntoRoad(road));
@@ -776,33 +802,24 @@
 
     /* ── Render Places ────────────────────────────────────── */
     function renderPlaces() {
-      // Determine current level
-      const curPlace = state.currentPlaceId ? loadPlaces().find(p => p.id === state.currentPlaceId) : null;
-      const curType  = curPlace ? curPlace.type : 'root';
-      const childType = CHILD_TYPE[curType];
-
-      // Build header
+      // Root always shows all locations. Country/City/Town are label attributes, not nav layers.
       const hdr = document.getElementById('places-view-header');
       hdr.innerHTML = '';
       const titleDiv = document.createElement('div');
       const titleEl = document.createElement('h2');
       titleEl.className = 'view-title';
-      titleEl.textContent = curPlace
-        ? (TYPE_PLURAL[childType] || 'Roads') + ' in ' + curPlace.name
-        : 'Countries';
+      titleEl.textContent = 'Your Locations';
       titleDiv.appendChild(titleEl);
       hdr.appendChild(titleDiv);
 
-      if (childType) {
-        const addBtn = document.createElement('button');
-        addBtn.className = 'btn btn-primary';
-        addBtn.textContent = '+ Add ' + TYPE_LABEL[childType];
-        addBtn.addEventListener('click', () => openNewPlaceModal(state.currentPlaceId, childType));
-        hdr.appendChild(addBtn);
-      }
+      const addBtn = document.createElement('button');
+      addBtn.className = 'btn btn-primary';
+      addBtn.textContent = '+ Add Location';
+      addBtn.addEventListener('click', () => openNewPlaceModal(null, 'location'));
+      hdr.appendChild(addBtn);
 
-      // Get children
-      let items = loadPlaces().filter(p => p.parentId === state.currentPlaceId);
+      // Get all locations
+      let items = loadPlaces().filter(p => p.type === 'location');
       if (state.search) items = items.filter(p => p.name.toLowerCase().includes(state.search));
       items.sort((a,b) => a.name.localeCompare(b.name));
 
@@ -815,7 +832,7 @@
         if (state.search) {
           empty.textContent = 'No results for "' + state.search + '".';
         } else {
-          empty.innerHTML = `<div>No ${childType ? TYPE_PLURAL[childType] : 'items'} yet.</div><div class="empty-state-hint">Click "+ Add ${childType ? TYPE_LABEL[childType] : 'Item'}" to get started.</div>`;
+          empty.innerHTML = '<div>No locations yet.</div><div class="empty-state-hint">Click "+ Add Location" or use the search below to find and join one.</div>';
         }
         container.appendChild(empty);
       } else {
@@ -886,24 +903,21 @@
       const acts = document.createElement('div');
       acts.className = 'view-actions';
 
-      // Admin buttons (only for org-based locations where user is owner)
-      if (!isUngrouped && location && location.locationType !== 'individual') {
-        const settings = loadSettings();
-        const isOwner = location.ownerId === settings.currentUser || true; // local mode: creator is always admin
-        if (isOwner) {
-          const membersBtn = document.createElement('button');
-          membersBtn.className = 'btn btn-ghost btn-sm';
-          membersBtn.textContent = '👥 Members';
-          membersBtn.addEventListener('click', () => openMembersModal(locationId));
+      // Members + join request buttons for all non-ungrouped locations
+      if (!isUngrouped && location) {
+        const membersBtn = document.createElement('button');
+        membersBtn.className = 'btn btn-ghost btn-sm';
+        membersBtn.textContent = '👥 Members';
+        membersBtn.addEventListener('click', () => openMembersModal(locationId));
+        acts.appendChild(membersBtn);
 
+        const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
+          .filter(r => r.locationId === locationId && r.status === 'pending');
+        if (reqs.length) {
           const reqsBtn = document.createElement('button');
-          const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
-            .filter(r => r.locationId === locationId && r.status === 'pending');
           reqsBtn.className = 'btn btn-ghost btn-sm';
-          reqsBtn.textContent = '📋 Requests' + (reqs.length ? ` (${reqs.length})` : '');
+          reqsBtn.textContent = '📋 Requests (' + reqs.length + ')';
           reqsBtn.addEventListener('click', () => openJoinRequestsModal(locationId));
-
-          acts.appendChild(membersBtn);
           acts.appendChild(reqsBtn);
         }
       }
@@ -1031,7 +1045,7 @@
 
       // If user has no location yet, show the "Find your location" screen
       const locations = loadPlaces().filter(p => p.type === 'location');
-      const showFindLocation = locations.length === 0 && state.view === 'places' && !state.currentPlaceId;
+      const showFindLocation = locations.length === 0 && state.view === 'places';
 
       findLocEl.classList.toggle('hidden', !showFindLocation);
       document.getElementById('view-places').classList.toggle('hidden',    state.view !== 'places' || showFindLocation);
@@ -1141,28 +1155,7 @@
 
     /* ── New Place Modal ──────────────────────────────────── */
     function openNewPlaceModal(parentId, childType) {
-      // For country / city / town: simple name field
-      if (childType !== 'location') {
-        const placeholders = { country:'United Kingdom', city:'London', town:'Camden' };
-        openModal(c => {
-          c.appendChild(el('h3','modal-title','New ' + TYPE_LABEL[childType]));
-          const nameIn = textInput('np-name', 'e.g. ' + (placeholders[childType] || ''), '');
-          c.appendChild(field(TYPE_LABEL[childType] + ' Name', nameIn, 'Name is required.'));
-          const footer = document.createElement('div'); footer.className = 'modal-footer';
-          footer.appendChild(btn('btn-ghost','Cancel',closeModal));
-          footer.appendChild(btn('btn-primary','Create', () => {
-            const name = nameIn.value.trim();
-            if (!name) { document.getElementById('err-np-name').classList.add('visible'); return; }
-            const places = loadPlaces();
-            places.push({ id:uid(), parentId, type:childType, name });
-            savePlaces(places); closeModal(); render();
-          }));
-          c.appendChild(footer);
-        });
-        return;
-      }
-
-      // For location: two-tab modal (Search OSM / Individual workspace)
+      // Location modal: two-tab modal (Search OSM / Individual workspace)
       openModal(c => {
         c.appendChild(el('h3','modal-title','Add Location'));
 
@@ -1203,7 +1196,24 @@
         const customLabelIn = textInput('loc-custom-label','e.g. Community Centre','');
         customLabelWrap.appendChild(field('Custom Label', customLabelIn, ''));
         typeSection.appendChild(customLabelWrap);
+
+        // ── Country / City / Town (auto-filled from OSM, editable) ──
+        const hierarchySection = document.createElement('div');
+        hierarchySection.style.marginTop = '0.75rem';
+        hierarchySection.appendChild(el('div','modal-label','Location Hierarchy'));
+        const hierRow = el('div','modal-row');
+        const countryIn = textInput('loc-country','Country e.g. UK','');
+        const cityIn    = textInput('loc-city','City e.g. London','');
+        const townIn    = textInput('loc-town','Town / Area e.g. Camden','');
+        const townWrap  = el('div','modal-field'); townWrap.style.marginBottom = '0';
+        townWrap.appendChild(el('label','modal-label','Town / Area')); townWrap.appendChild(townIn);
+        hierRow.appendChild(field('Country', countryIn, ''));
+        hierRow.appendChild(field('City', cityIn, ''));
+        hierRow.style.marginBottom = '0.5rem';
+        hierarchySection.appendChild(hierRow);
+        hierarchySection.appendChild(townWrap);
         searchPanel.appendChild(typeSection);
+        searchPanel.appendChild(hierarchySection);
 
         c.appendChild(searchPanel);
 
@@ -1212,6 +1222,19 @@
         indivPanel.style.display = 'none';
         const indivNameIn = textInput('indiv-name','My workspace name','');
         indivPanel.appendChild(field('Workspace Name', indivNameIn, 'Name is required.'));
+
+        // Country/City/Town for individual workspace
+        const indivHierRow = el('div','modal-row');
+        const indivCountryIn = textInput('indiv-country','Country e.g. UK','');
+        const indivCityIn    = textInput('indiv-city','City e.g. London','');
+        const indivTownWrap  = el('div','modal-field');
+        const indivTownIn    = textInput('indiv-town','Town / Area e.g. Camden','');
+        indivTownWrap.appendChild(el('label','modal-label','Town / Area')); indivTownWrap.appendChild(indivTownIn);
+        indivHierRow.appendChild(field('Country', indivCountryIn, ''));
+        indivHierRow.appendChild(field('City', indivCityIn, ''));
+        indivPanel.appendChild(el('div','modal-label','Location Hierarchy'));
+        indivPanel.appendChild(indivHierRow);
+        indivPanel.appendChild(indivTownWrap);
         c.appendChild(indivPanel);
 
         // Footer
@@ -1272,13 +1295,21 @@
               card.addEventListener('click', () => {
                 resultsBox.querySelectorAll('.osm-result-card').forEach(x => x.classList.remove('selected'));
                 card.classList.add('selected');
+                const addr = item.address || {};
                 selectedOsm = {
                   name:        item.display_name.split(',')[0],
                   address:     item.display_name,
                   lat:         parseFloat(item.lat),
                   lng:         parseFloat(item.lon),
                   osm_place_id: item.osm_type + item.osm_id,
+                  country:     addr.country || '',
+                  city:        addr.city || addr.town || addr.municipality || addr.county || '',
+                  town:        addr.suburb || addr.neighbourhood || addr.quarter || addr.village || '',
                 };
+                // Auto-fill hierarchy fields from OSM address data
+                countryIn.value = selectedOsm.country;
+                cityIn.value    = selectedOsm.city;
+                townIn.value    = selectedOsm.town;
                 typeSection.style.display = 'block';
               });
               resultsBox.appendChild(card);
@@ -1294,23 +1325,26 @@
             const name = indivNameIn.value.trim();
             if (!name) { alert('Please enter a workspace name.'); return; }
             const places = loadPlaces();
-            // Check for duplicate name
-            if (places.find(p => p.type === 'location' && p.name.toLowerCase() === name.toLowerCase() && p.parentId === parentId)) {
-              alert('A location with this name already exists here.'); return;
+            if (places.find(p => p.type === 'location' && p.name.toLowerCase() === name.toLowerCase())) {
+              alert('A location with this name already exists.'); return;
             }
-            places.push({ id:uid(), parentId, type:'location', name, locationType:'individual' });
+            places.push({
+              id: uid(), parentId: null, type: 'location', name, locationType: 'individual',
+              country: indivCountryIn.value.trim(),
+              city:    indivCityIn.value.trim(),
+              town:    indivTownIn.value.trim(),
+            });
             savePlaces(places); closeModal(); render();
           } else {
             if (!selectedOsm) { alert('Please select a location from the search results.'); return; }
             const places = loadPlaces();
-            // Duplicate check by osm_place_id
             if (places.find(p => p.osmPlaceId === selectedOsm.osm_place_id)) {
               alert('This location already exists. You can request to join it instead.'); closeModal(); return;
             }
             const customLabel = locType === 'custom' ? customLabelIn.value.trim() : '';
             places.push({
               id:          uid(),
-              parentId,
+              parentId:    null,
               type:        'location',
               name:        selectedOsm.name,
               address:     selectedOsm.address,
@@ -1319,6 +1353,9 @@
               osmPlaceId:  selectedOsm.osm_place_id,
               locationType: locType,
               locationTypeLabel: customLabel || null,
+              country:     countryIn.value.trim() || selectedOsm.country,
+              city:        cityIn.value.trim()    || selectedOsm.city,
+              town:        townIn.value.trim()    || selectedOsm.town,
             });
             savePlaces(places); closeModal(); render();
           }
@@ -1350,38 +1387,112 @@
       });
     }
 
+    /* ── Members storage helpers ─────────────────────────── */
+    function loadMembers(locationId) {
+      return JSON.parse(localStorage.getItem('rvt_members_' + locationId) || '[]');
+    }
+    function saveMembers(locationId, list) {
+      localStorage.setItem('rvt_members_' + locationId, JSON.stringify(list));
+    }
+
     /* ── Admin: Members Modal ────────────────────────────── */
     function openMembersModal(locationId) {
       const location = loadPlaces().find(p => p.id === locationId);
       openModal(c => {
         c.appendChild(el('h3','modal-title','👥 Members — ' + (location?.name || '')));
 
-        // For now members = users who have been approved via join requests
-        const approved = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
-          .filter(r => r.locationId === locationId && r.status === 'approved');
+        // Combined member list: manually added + approved join requests
+        function getAllMembers() {
+          const manual = loadMembers(locationId);
+          const approved = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
+            .filter(r => r.locationId === locationId && r.status === 'approved' && r.userName)
+            .map(r => r.userName);
+          return [...new Set([...manual, ...approved])];
+        }
 
-        if (!approved.length) {
-          c.appendChild(el('div','osm-status','No members yet. Approve join requests to add members.'));
-        } else {
-          const list = el('div','osm-results');
-          list.style.maxHeight = '300px';
-          approved.forEach(r => {
+        const listEl = el('div','osm-results');
+        listEl.style.maxHeight = '260px';
+
+        function refreshList() {
+          listEl.innerHTML = '';
+          const all = getAllMembers();
+          if (!all.length) {
+            listEl.appendChild(el('div','osm-status','No members yet. Add one below or approve join requests.'));
+            return;
+          }
+          all.forEach(name => {
             const row = el('div','join-result-card');
             row.style.marginBottom = '0.4rem';
             const info = el('div','join-result-info');
-            info.appendChild(el('div','join-result-name', r.userName || r.locationName || 'Member'));
-            info.appendChild(el('div','join-result-addr', 'Approved ' + new Date(r.reviewedAt || r.createdAt).toLocaleDateString()));
+            info.appendChild(el('div','join-result-name', name));
             const removeBtn = btn('btn-danger btn-sm','Remove', () => {
-              const all = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
-              const idx = all.findIndex(x => x.id === r.id);
-              if (idx !== -1) { all[idx].status = 'removed'; localStorage.setItem('rvt_join_requests', JSON.stringify(all)); }
-              closeModal();
+              const manual = loadMembers(locationId).filter(m => m !== name);
+              saveMembers(locationId, manual);
+              // Also mark join request as removed
+              const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+              const idx = reqs.findIndex(r => r.locationId === locationId && r.userName === name);
+              if (idx !== -1) { reqs[idx].status = 'removed'; localStorage.setItem('rvt_join_requests', JSON.stringify(reqs)); }
+              refreshList();
             });
             row.appendChild(info); row.appendChild(removeBtn);
-            list.appendChild(row);
+            listEl.appendChild(row);
           });
-          c.appendChild(list);
         }
+        refreshList();
+        c.appendChild(listEl);
+
+        // ── Invite by email + shareable link ──
+        c.appendChild(el('div','modal-label','Invite Someone'));
+
+        // Build join token from location data
+        const locSnapshot = {
+          id:                location.id,
+          name:              location.name,
+          locationType:      location.locationType || 'custom',
+          locationTypeLabel: location.locationTypeLabel || null,
+          country:           location.country || '',
+          city:              location.city    || '',
+          town:              location.town    || '',
+          address:           location.address || '',
+        };
+        const joinToken  = btoa(unescape(encodeURIComponent(JSON.stringify(locSnapshot))));
+        const loginBase  = window.location.href.replace('index-v2.html', 'login-v2.html').split('?')[0];
+        const joinUrl    = loginBase + '?join=' + joinToken;
+
+        const inviteRow = el('div','settings-add-row');
+        const emailIn   = document.createElement('input');
+        emailIn.className = 'modal-input'; emailIn.type = 'email';
+        emailIn.placeholder = 'Their email (optional — for your records)';
+
+        const getBtn = btn('btn-primary btn-sm','Get Invite Link', () => {
+          const email = emailIn.value.trim();
+          if (email) {
+            const manual = loadMembers(locationId);
+            if (!getAllMembers().includes(email)) { manual.push(email); saveMembers(locationId, manual); refreshList(); }
+          }
+          linkBox.classList.remove('hidden');
+          linkIn.focus(); linkIn.select();
+        });
+        inviteRow.appendChild(emailIn); inviteRow.appendChild(getBtn);
+        c.appendChild(inviteRow);
+
+        // Link box (hidden until "Get Invite Link" clicked)
+        const linkBox = el('div','hidden');
+        linkBox.style.marginTop = '0.65rem';
+        linkBox.appendChild(el('div','modal-label','Share this link — they sign up, they join automatically'));
+        const linkRow = el('div','settings-add-row');
+        const linkIn  = document.createElement('input');
+        linkIn.className = 'modal-input'; linkIn.type = 'text';
+        linkIn.value = joinUrl; linkIn.readOnly = true;
+        linkIn.style.fontSize = '0.72rem';
+        const copyBtn = btn('btn-ghost btn-sm','📋 Copy', () => {
+          navigator.clipboard.writeText(joinUrl)
+            .then(() => { copyBtn.textContent = '✓ Copied!'; setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 2000); })
+            .catch(() => { linkIn.select(); document.execCommand('copy'); copyBtn.textContent = '✓ Copied!'; setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 2000); });
+        });
+        linkRow.appendChild(linkIn); linkRow.appendChild(copyBtn);
+        linkBox.appendChild(linkRow);
+        c.appendChild(linkBox);
 
         const footer = el('div','modal-footer');
         footer.appendChild(btn('btn-ghost','Close', closeModal));
@@ -1557,7 +1668,36 @@
 
         const byWrap = el('div','modal-field'); byWrap.style.marginBottom = '0';
         byWrap.appendChild(el('label','modal-label','Entered By'));
-        const byIn = textInput('','Your name', settings.currentUser || '');
+
+        // Auto-fill: auth user > saved setting > empty
+        const authUser = window._rvtAuthUser;
+        const defaultName = (authUser && (authUser.name || authUser.email)) || settings.currentUser || '';
+
+        // Build member list for dropdown: auth user + approved members for current location
+        const memberNames = [];
+        if (authUser && (authUser.name || authUser.email)) memberNames.push(authUser.name || authUser.email);
+        const locationMembers = JSON.parse(localStorage.getItem('rvt_members_' + (state.currentLocationId || '')) || '[]');
+        locationMembers.forEach(m => { if (m && !memberNames.includes(m)) memberNames.push(m); });
+        const approvedReqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
+          .filter(r => r.locationId === state.currentLocationId && r.status === 'approved' && r.userName);
+        approvedReqs.forEach(r => { if (!memberNames.includes(r.userName)) memberNames.push(r.userName); });
+
+        let byIn;
+        if (memberNames.length > 1) {
+          // Show dropdown if multiple members known
+          byIn = document.createElement('select');
+          byIn.className = 'modal-input';
+          memberNames.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            if (name === defaultName) opt.selected = true;
+            byIn.appendChild(opt);
+          });
+          const otherOpt = document.createElement('option'); otherOpt.value = ''; otherOpt.textContent = '— type a name —';
+          byIn.appendChild(otherOpt);
+        } else {
+          byIn = textInput('','Your name', defaultName);
+        }
         byWrap.appendChild(byIn);
 
         row.appendChild(dtWrap); row.appendChild(byWrap);
@@ -1844,7 +1984,8 @@
             const reqBtn = btn('btn-primary btn-sm','Request Access', () => {
               const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
               if (reqs.find(r => r.locationId === loc.id)) { alert('You already sent a request for this location.'); return; }
-              reqs.push({ id:uid(), locationId:loc.id, locationName:loc.name, address:loc.address||'', status:'pending', createdAt:new Date().toISOString() });
+              const authU = window._rvtAuthUser;
+              reqs.push({ id:uid(), locationId:loc.id, locationName:loc.name, address:loc.address||'', status:'pending', createdAt:new Date().toISOString(), userName: (authU && (authU.name || authU.email)) || '' });
               localStorage.setItem('rvt_join_requests', JSON.stringify(reqs));
               alert('Request sent! The admin will review it shortly.');
               renderMyJoinRequests();
@@ -1898,29 +2039,63 @@
     /* ── Leaflet Road Location ───────────────────────────── */
     let _leafletMap = null, _leafletMarker = null, _mapRoadId = null, _pendingLatLng = null;
 
+    function setMapPin(lat, lng) {
+      _pendingLatLng = { lat, lng };
+      const ll = L.latLng(lat, lng);
+      if (_leafletMarker) _leafletMarker.setLatLng(ll);
+      else _leafletMarker = L.marker(ll).addTo(_leafletMap);
+      _leafletMap.setView(ll, 15);
+      document.getElementById('map-coords').textContent =
+        `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`;
+      reverseGeocode(lat, lng);
+    }
+
+    async function reverseGeocode(lat, lng) {
+      const hierEl = document.getElementById('map-hierarchy');
+      hierEl.textContent = 'Looking up location…';
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = await res.json();
+        const a = data.address || {};
+        const country = a.country || '';
+        const city    = a.city || a.town || a.municipality || a.county || '';
+        const town    = a.suburb || a.neighbourhood || a.quarter || a.village || '';
+        const parts   = [country, city, town].filter(Boolean);
+        hierEl.textContent = parts.length ? '📍 ' + parts.join(' › ') : '';
+        // Store hierarchy on pending pin for saving with the road
+        _pendingLatLng.country = country;
+        _pendingLatLng.city    = city;
+        _pendingLatLng.town    = town;
+      } catch(e) {
+        hierEl.textContent = '';
+      }
+    }
+
     function openMapModal(roadId) {
       _mapRoadId = roadId;
       const road  = loadRoads().find(r => r.id === roadId);
       _pendingLatLng = road?.lat && road?.lng ? { lat: road.lat, lng: road.lng } : null;
 
       document.getElementById('map-modal').classList.remove('hidden');
+      document.getElementById('map-hierarchy').textContent = '';
 
       // Init map once
       if (!_leafletMap) {
         _leafletMap = L.map('leaflet-map').setView([51.505, -0.09], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors', maxZoom: 19,
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+          subdomains: 'abcd',
+          maxZoom: 20,
         }).addTo(_leafletMap);
         _leafletMap.on('click', e => {
-          _pendingLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
-          if (_leafletMarker) _leafletMarker.setLatLng(e.latlng);
-          else _leafletMarker = L.marker(e.latlng).addTo(_leafletMap);
-          document.getElementById('map-coords').textContent =
-            `Lat: ${e.latlng.lat.toFixed(6)}, Lng: ${e.latlng.lng.toFixed(6)}`;
+          setMapPin(e.latlng.lat, e.latlng.lng);
         });
       }
 
-      // Place existing pin or clear
+      // Place existing pin or centre on GPS
       if (_pendingLatLng) {
         const ll = L.latLng(_pendingLatLng.lat, _pendingLatLng.lng);
         if (_leafletMarker) _leafletMarker.setLatLng(ll);
@@ -1928,17 +2103,17 @@
         _leafletMap.setView(ll, 15);
         document.getElementById('map-coords').textContent =
           `Lat: ${_pendingLatLng.lat.toFixed(6)}, Lng: ${_pendingLatLng.lng.toFixed(6)}`;
+        reverseGeocode(_pendingLatLng.lat, _pendingLatLng.lng);
       } else {
         if (_leafletMarker) { _leafletMarker.remove(); _leafletMarker = null; }
-        document.getElementById('map-coords').textContent = 'Click on the map to set location';
-        // Try to centre on user's location
+        document.getElementById('map-coords').textContent = 'Click the map to pin a location';
+        // Centre on GPS silently
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(pos => {
             _leafletMap.setView([pos.coords.latitude, pos.coords.longitude], 14);
           });
         }
       }
-      // Force map to re-render (needed after display:none → visible)
       setTimeout(() => _leafletMap.invalidateSize(), 50);
     }
 
@@ -1951,8 +2126,11 @@
       const roads = loadRoads();
       const idx = roads.findIndex(r => r.id === _mapRoadId);
       if (idx !== -1) {
-        roads[idx].lat = _pendingLatLng.lat;
-        roads[idx].lng = _pendingLatLng.lng;
+        roads[idx].lat     = _pendingLatLng.lat;
+        roads[idx].lng     = _pendingLatLng.lng;
+        roads[idx].country = _pendingLatLng.country || roads[idx].country || '';
+        roads[idx].city    = _pendingLatLng.city    || roads[idx].city    || '';
+        roads[idx].town    = _pendingLatLng.town    || roads[idx].town    || '';
         saveRoads(roads);
       }
       closeMapModal(); render();
@@ -1968,27 +2146,74 @@
       document.getElementById('map-clear-btn').addEventListener('click', () => {
         _pendingLatLng = null;
         if (_leafletMarker) { _leafletMarker.remove(); _leafletMarker = null; }
-        document.getElementById('map-coords').textContent = 'Click on the map to set location';
+        document.getElementById('map-coords').textContent = 'Click the map to pin a location';
+        document.getElementById('map-hierarchy').textContent = '';
+      });
+      document.getElementById('map-gps-btn').addEventListener('click', () => {
+        if (!navigator.geolocation) { alert('Geolocation is not supported by your browser.'); return; }
+        const btn = document.getElementById('map-gps-btn');
+        btn.textContent = '⏳ Getting location…';
+        btn.disabled = true;
+        navigator.geolocation.getCurrentPosition(
+          pos => {
+            btn.textContent = '📍 Use My GPS'; btn.disabled = false;
+            setMapPin(pos.coords.latitude, pos.coords.longitude);
+          },
+          () => { btn.textContent = '📍 Use My GPS'; btn.disabled = false; alert('Could not get your location. Please allow location access.'); }
+        );
       });
 
       render();
     });
 
+    // ── Join invite processor (called by auth module after sign-in) ──
+    window._rvtProcessJoin = function(token) {
+      try {
+        const locData = JSON.parse(decodeURIComponent(escape(atob(token))));
+        const places = loadPlaces();
+        if (!places.find(p => p.id === locData.id)) {
+          places.push({ ...locData, type: 'location', joinedAt: new Date().toISOString() });
+          savePlaces(places);
+          render();
+        }
+        localStorage.removeItem('rvt_pending_join');
+        // Toast notification
+        const toast = document.createElement('div');
+        toast.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:var(--gold);color:#0a0a0a;padding:0.65rem 1.4rem;border-radius:var(--radius-lg);font-size:0.88rem;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.5);';
+        toast.textContent = '✓ Joined "' + locData.name + '"!';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+      } catch(e) {
+        localStorage.removeItem('rvt_pending_join');
+      }
+    };
+
   }());
   </script>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"
+          integrity="sha384-rwykjmWNwVxboyFmvK9OXN0wj9hnMHA2aAHtits54DuACyCq0M2PrSNxhRb+hvXT"
+          crossorigin="anonymous"></script>
   <script type="module">
     import { Auth, db } from './supabase-client-v2.js';
 
     // ── Auth guard: redirect to login if not signed in ───────
     const { data: { session } } = await db.auth.getSession();
     if (!session) {
-      window.location.replace('login.html');
+      window.location.replace('login-v2.html');
     } else {
       // Show user email in header
-      const email = session.user.email || session.user.user_metadata?.full_name || '';
-      document.getElementById('user-email').textContent = email;
+      const email = session.user.email || '';
+      const fullName = session.user.user_metadata?.full_name || '';
+      document.getElementById('user-email').textContent = fullName || email;
+      // Expose auth user to the localStorage IIFE so visit log can auto-fill
+      window._rvtAuthUser = { name: fullName, email };
+
+      // ── Process pending join invite ─────────────────────────
+      const pendingJoin = localStorage.getItem('rvt_pending_join');
+      if (pendingJoin && typeof window._rvtProcessJoin === 'function') {
+        window._rvtProcessJoin(pendingJoin);
+      }
     }
 
     // ── Sign out ─────────────────────────────────────────────
