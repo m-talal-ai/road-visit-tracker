@@ -850,7 +850,13 @@ const Locations = {
       .map(m => ({ ...m.organizations?.places, role: m.role, org_id: m.org_id }))
       .filter(l => l?.id);
 
-    return [...(individual || []), ...orgLocations];
+    // Deduplicate by place id — org membership takes priority (has role/org_id set)
+    const seen = new Set();
+    return [...orgLocations, ...(individual || [])].filter(l => {
+      if (!l?.id || seen.has(l.id)) return false;
+      seen.add(l.id);
+      return true;
+    });
   },
 
   /** Check if current user is admin/owner of a location org */
