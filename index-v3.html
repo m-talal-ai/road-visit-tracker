@@ -487,9 +487,12 @@
 
     function _syncCreateRoad(r) {
       if (!window._rvtDb || !window._rvtUserId) return;
+      const place = window._rvtCache?.places?.find(p => p.id === r.locationId);
+      const orgId = place?.orgId || null;
       _syncWrite(() => window._rvtDb.from('roads').insert({
         id: r.id, name: r.name, postcode: r.postcode || null,
         location_id: r.locationId || null,
+        org_id: orgId,
         lat: r.lat || null, lng: r.lng || null,
         country: r.country || null, city: r.city || null, town: r.town || null,
         owner_id: window._rvtUserId, created_by: window._rvtUserId,
@@ -511,8 +514,12 @@
 
     function _syncCreateAddress(a) {
       if (!window._rvtDb || !window._rvtUserId) return;
+      const road  = window._rvtCache?.roads?.find(r => r.id === a.roadId);
+      const place = road ? window._rvtCache?.places?.find(p => p.id === road.locationId) : null;
+      const orgId = place?.orgId || null;
       _syncWrite(() => window._rvtDb.from('addresses').insert({
         id: a.id, road_id: a.roadId, address: a.address,
+        org_id: orgId,
         owner_id: window._rvtUserId, created_by: window._rvtUserId,
       }).then(r => { if (r.error) throw r.error; }));
     }
@@ -528,10 +535,15 @@
 
     function _syncCreateVisit(v) {
       if (!window._rvtDb || !window._rvtUserId) return;
+      const addr  = window._rvtCache?.addresses?.find(a => a.id === v.addressId);
+      const road  = addr  ? window._rvtCache?.roads?.find(r => r.id === addr.roadId) : null;
+      const place = road  ? window._rvtCache?.places?.find(p => p.id === road.locationId) : null;
+      const orgId = place?.orgId || null;
       _syncWrite(() => window._rvtDb.from('visits').insert({
         id: v.id, address_id: v.addressId, outcome: v.outcome,
         visited_at: v.timestamp, entered_by_name: v.enteredBy || null,
         entered_by_user_id: window._rvtUserId,
+        org_id: orgId,
       }).then(r => { if (r.error) throw r.error; }));
     }
 
@@ -813,6 +825,7 @@
           : place.locationType === 'individual' ? '👤 Individual'
           : (place.locationTypeLabel || '📍 Location');
         sub.textContent = typeLabel;
+        card.appendChild(top); card.appendChild(sub);
         // Show country · city · town hierarchy
         const hier = [place.country, place.city, place.town].filter(Boolean).join(' · ');
         if (hier) {
@@ -820,11 +833,18 @@
           hierEl.className = 'card-sub';
           hierEl.style.fontSize = '0.7rem';
           hierEl.style.color = 'var(--gold-dim)';
-          hierEl.textContent = hier;
-          card.appendChild(top); card.appendChild(sub); card.appendChild(hierEl);
-          card.addEventListener('click', () => navigateIntoPlace(place));
-          return card;
+          hierEl.textContent = (place.lat ? '📍 ' : '') + hier;
+          card.appendChild(hierEl);
+        } else if (place.lat) {
+          const pinEl = document.createElement('div');
+          pinEl.className = 'card-sub';
+          pinEl.style.fontSize = '0.7rem';
+          pinEl.style.color = 'var(--gold-dim)';
+          pinEl.textContent = '📍 Location pinned on map';
+          card.appendChild(pinEl);
         }
+        card.addEventListener('click', () => navigateIntoPlace(place));
+        return card;
       } else {
         sub.textContent = count + ' ' + (TYPE_PLURAL['location'] || 'Locations').toLowerCase();
       }
@@ -850,10 +870,13 @@
 
       const sub = document.createElement('div');
       sub.className = 'list-sub';
-      const hier = place.type === 'location'
+      const hierParts = place.type === 'location'
         ? [place.country, place.city, place.town].filter(Boolean).join(' · ')
-        : count + ' ' + (TYPE_PLURAL['location'] || 'locations').toLowerCase();
-      sub.textContent = hier || (count + ' roads');
+        : '';
+      const hier = hierParts
+        ? (place.lat ? '📍 ' : '') + hierParts
+        : (place.type === 'location' && place.lat ? '📍 Location pinned on map' : '');
+      sub.textContent = hier || (place.type === 'location' ? '' : count + ' roads');
 
       const acts = document.createElement('div');
       acts.className = 'list-actions';
@@ -1691,6 +1714,7 @@
         // Build join token from location data
         const locSnapshot = {
           id:                location.id,
+          orgId:             location.orgId   || null,
           name:              location.name,
           locationType:      location.locationType || 'custom',
           locationTypeLabel: location.locationTypeLabel || null,
@@ -2475,11 +2499,12 @@
       const createOwnBtn = document.getElementById('btn-create-own');
       if (createOwnBtn) {
         createOwnBtn.addEventListener('click', () => {
-          const name = prompt('Enter a name for your private workspace:');
-          if (!name || !name.trim()) return;
-          const places = loadPlaces();
-          places.push({ id:uid(), parentId:null, type:'location', name:name.trim(), locationType:'individual' });
-          savePlaces(places); render();
+          openNewPlaceModal(null, 'location');
+          // Auto-select the Individual tab once the modal renders
+          setTimeout(() => {
+            const tabs = document.querySelectorAll('#modal-content .loc-tab');
+            if (tabs[1]) tabs[1].click();
+          }, 0);
         });
       }
     }
@@ -2666,10 +2691,26 @@
       // Load all data then render
       await initCache();
 
-      // Process pending join invite (Phase 7 backwards compat)
+      // Process pending join invite
       const pendingJoin = localStorage.getItem('rvt_pending_join');
-      if (pendingJoin && typeof window._rvtProcessJoin === 'function') {
-        window._rvtProcessJoin(pendingJoin);
+      if (pendingJoin) {
+        localStorage.removeItem('rvt_pending_join');
+        try {
+          const locData = JSON.parse(decodeURIComponent(escape(atob(pendingJoin))));
+          if (locData.orgId) {
+            // New-style token: join via Supabase org membership
+            const { error } = await db.rpc('fn_join_location', { p_org_id: locData.orgId });
+            if (error) throw error;
+            // Reload cache — user is now a member and can see the location's data
+            await initCache();
+            if (window._rvtShowToast) window._rvtShowToast('✓ Joined "' + locData.name + '"!');
+          } else {
+            // Legacy token (no orgId): add to local cache only
+            if (typeof window._rvtProcessJoin === 'function') window._rvtProcessJoin(pendingJoin);
+          }
+        } catch(e) {
+          if (window._rvtShowToast) window._rvtShowToast('Could not join location: ' + (e.message || 'unknown error'), true);
+        }
       }
     }
 
