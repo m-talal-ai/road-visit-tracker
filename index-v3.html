@@ -543,7 +543,7 @@
         id: v.id, address_id: v.addressId, outcome: v.outcome,
         visited_at: v.timestamp, entered_by_name: v.enteredBy || null,
         entered_by_user_id: window._rvtUserId,
-        org_id: orgId,
+        // visits has no org_id — access is derived via road.org_id in RLS
       }).then(r => { if (r.error) throw r.error; }));
     }
 
