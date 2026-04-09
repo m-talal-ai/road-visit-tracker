@@ -2648,6 +2648,12 @@
     window._rvtRender     = render;
     window._rvtShowToast  = _showToast;
 
+    // Navigate straight into a location's roads view (used after join)
+    window._rvtOpenLocation = function(locationId) {
+      const place = _cache.places.find(p => p.id === locationId);
+      if (place) navigateIntoPlace(place);
+    };
+
     // ── Join invite processor (Phase 7 — localStorage invite, kept for backwards compat) ──
     window._rvtProcessJoin = function(token) {
       try {
@@ -2704,6 +2710,9 @@
             // Reload cache — user is now a member and can see the location's data
             await initCache();
             if (window._rvtShowToast) window._rvtShowToast('✓ Joined "' + locData.name + '"!');
+            // Navigate straight to the joined location's roads view
+            const joined = window._rvtCache?.places?.find(p => p.orgId === locData.orgId);
+            if (joined && window._rvtOpenLocation) window._rvtOpenLocation(joined.id);
           } else {
             // Legacy token (no orgId): add to local cache only
             if (typeof window._rvtProcessJoin === 'function') window._rvtProcessJoin(pendingJoin);
