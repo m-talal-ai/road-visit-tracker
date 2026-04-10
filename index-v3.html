@@ -510,12 +510,7 @@
     }
     function _syncDeleteRoad(id) {
       if (!window._rvtDb) return;
-      const now = new Date().toISOString();
-      _syncWrite(async () => {
-        const { error: re } = await window._rvtDb.from('roads').update({ deleted_at: now }).eq('id', id);
-        if (re) throw re;
-        await window._rvtDb.from('addresses').update({ deleted_at: now }).eq('road_id', id);
-      });
+      _syncWrite(() => window._rvtDb.rpc('fn_soft_delete_road', { p_road_id: id }).then(r => { if (r.error) throw r.error; }));
     }
 
     function _syncCreateAddress(a) {
@@ -531,12 +526,7 @@
     }
     function _syncDeleteAddress(id) {
       if (!window._rvtDb) return;
-      const now = new Date().toISOString();
-      _syncWrite(async () => {
-        const { error: ae } = await window._rvtDb.from('addresses').update({ deleted_at: now }).eq('id', id);
-        if (ae) throw ae;
-        await window._rvtDb.from('visits').update({ deleted_at: now }).eq('address_id', id);
-      });
+      _syncWrite(() => window._rvtDb.rpc('fn_soft_delete_address', { p_address_id: id }).then(r => { if (r.error) throw r.error; }));
     }
 
     function _syncCreateVisit(v) {
@@ -2825,15 +2815,18 @@
       try {
         const cache = window._rvtCache;
 
-        // 1. Locations
+        // 1. Locations (deduplicate by id — same place can appear via individual + org membership)
         const dbLocs = await Locations.getMyLocations();
-        cache.places = dbLocs.map(mapDbPlace);
-        const locIds = dbLocs.map(l => l.id);
+        const seenLoc = new Set();
+        const uniqueLocs = dbLocs.filter(l => { if (seenLoc.has(l.id)) return false; seenLoc.add(l.id); return true; });
+        cache.places = uniqueLocs.map(mapDbPlace);
+        const locIds = [...new Set(uniqueLocs.map(l => l.id))];
 
         if (locIds.length) {
-          // 2. Roads (parallel per location)
+          // 2. Roads (parallel per location, deduplicate by road id)
           const roadArrays = await Promise.all(locIds.map(id => Roads.getByLocation(id)));
-          const allDbRoads = roadArrays.flat();
+          const seenRoad = new Set();
+          const allDbRoads = roadArrays.flat().filter(r => { if (seenRoad.has(r.id)) return false; seenRoad.add(r.id); return true; });
           cache.roads = allDbRoads.map(mapDbRoad);
           const roadIds = allDbRoads.map(r => r.id);
 
