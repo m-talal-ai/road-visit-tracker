@@ -1840,19 +1840,70 @@
         const titleEl = el('h3','modal-title','New Road');
         const nameIn = textInput('nr-name','e.g. Oak Street','');
         const nameField = field('Road Name', nameIn, 'Road name is required.');
-        const footer = document.createElement('div'); footer.className = 'modal-footer';
 
+        // Results list shown while typing
+        const resultsList = document.createElement('div');
+        resultsList.style.cssText = 'margin-top:0.4rem;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;display:none;';
+
+        let hasExactMatch = false;
+
+        function toTitleCase(str) {
+          return str.replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        nameIn.addEventListener('input', () => {
+          // Auto title-case while preserving cursor position
+          const pos = nameIn.selectionStart;
+          const titled = toTitleCase(nameIn.value);
+          if (nameIn.value !== titled) { nameIn.value = titled; nameIn.setSelectionRange(pos, pos); }
+
+          const val = nameIn.value.trim();
+          resultsList.innerHTML = '';
+          hasExactMatch = false;
+
+          if (!val) { resultsList.style.display = 'none'; createBtn.disabled = false; return; }
+
+          const matches = loadRoads().filter(r =>
+            r.locationId === (locationId || null) &&
+            r.name.toLowerCase().includes(val.toLowerCase())
+          );
+
+          if (!matches.length) { resultsList.style.display = 'none'; createBtn.disabled = false; return; }
+
+          matches.forEach(r => {
+            const isExact = r.name.toLowerCase() === val.toLowerCase();
+            if (isExact) hasExactMatch = true;
+
+            const row = document.createElement('div');
+            row.style.cssText = 'padding:0.6rem 0.85rem;cursor:pointer;font-size:0.88rem;display:flex;align-items:center;justify-content:space-between;background:var(--surface-2);border-bottom:1px solid var(--border);';
+            row.innerHTML = '<span>' + r.name + (isExact ? ' <span style="font-size:0.72rem;color:var(--gold);">(already exists)</span>' : '') + '</span>' +
+              '<span style="font-size:0.75rem;color:var(--text-muted);">Go to road →</span>';
+
+            row.addEventListener('mouseenter', () => row.style.background = 'var(--surface-3, #2a2a2a)');
+            row.addEventListener('mouseleave', () => row.style.background = 'var(--surface-2)');
+            row.addEventListener('click', () => { closeModal(); navigateIntoRoad(r); });
+
+            resultsList.appendChild(row);
+          });
+
+          resultsList.style.display = 'block';
+          createBtn.disabled = hasExactMatch;
+        });
+
+        const footer = document.createElement('div'); footer.className = 'modal-footer';
         footer.appendChild(btn('btn-ghost','Cancel',closeModal));
-        footer.appendChild(btn('btn-primary','Create Road', () => {
+        const createBtn = btn('btn-primary','Create Road', () => {
           const name = nameIn.value.trim();
           if (!name) { document.getElementById('err-nr-name').classList.add('visible'); return; }
+          if (hasExactMatch) return;
           const road = { id:uid(), name, locationId: locationId || null, tags:[], createdAt:new Date().toISOString() };
           const roads = loadRoads(); roads.push(road); saveRoads(roads);
           _syncCreateRoad(road);
           closeModal(); render();
-        }));
+        });
+        footer.appendChild(createBtn);
 
-        c.appendChild(titleEl); c.appendChild(nameField);
+        c.appendChild(titleEl); c.appendChild(nameField); c.appendChild(resultsList);
         c.appendChild(footer);
       });
     }
