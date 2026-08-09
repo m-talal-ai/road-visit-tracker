@@ -895,6 +895,65 @@ const Locations = {
     if (error) throw error;
   },
 
+  /** Invite a member by email (saves to location_invites table) */
+  async inviteByEmail(locationId, orgId, email) {
+    const user = await Auth.getUser();
+    const { error } = await db.from('location_invites').upsert({
+      location_id: locationId,
+      org_id: orgId || null,
+      email: email.toLowerCase().trim(),
+      invited_by: user.id,
+      deleted_at: null,
+      accepted_at: null,
+    }, { onConflict: 'location_id,email', ignoreDuplicates: false });
+    if (error) throw error;
+  },
+
+  /** Get all invites (pending + accepted) for a location */
+  async getInvites(locationId) {
+    const { data, error } = await db
+      .from('location_invites')
+      .select('*')
+      .eq('location_id', locationId)
+      .is('deleted_at', null)
+      .order('created_at');
+    if (error) throw error;
+    return data || [];
+  },
+
+  /** Get pending invites for the currently logged-in user's email */
+  async getPendingInvitesForMe(userEmail) {
+    const { data, error } = await db
+      .from('location_invites')
+      .select('*, places!location_id(id, name)')
+      .eq('email', userEmail.toLowerCase().trim())
+      .is('accepted_at', null)
+      .is('deleted_at', null);
+    if (error) throw error;
+    return data || [];
+  },
+
+  /** Mark an invite as accepted */
+  async acceptInvite(locationId, userEmail) {
+    const { error } = await db
+      .from('location_invites')
+      .update({ accepted_at: new Date().toISOString() })
+      .eq('location_id', locationId)
+      .eq('email', userEmail.toLowerCase().trim())
+      .is('deleted_at', null);
+    if (error) throw error;
+  },
+
+  /** Remove an invite (soft delete) */
+  async removeInvite(locationId, email) {
+    const { error } = await db
+      .from('location_invites')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('location_id', locationId)
+      .eq('email', email.toLowerCase().trim());
+    if (error) throw error;
+  },
+
   /** Update a member's role */
   async updateMemberRole(orgId, userId, role) {
     const { error } = await db
