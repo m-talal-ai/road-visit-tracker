@@ -465,21 +465,59 @@
     }
 
     /* ── Print Roads ──────────────────────────────────────── */
-    function printRoads(roadIds) {
+    /* ── Print format picker — shown before every print action ── */
+    function openPrintFormatModal(roadIds) {
       if (!roadIds || !roadIds.length) return;
+      openModal(c => {
+        c.appendChild(el('h3','modal-title','🖨 Choose Print Format'));
+        const body = el('div','');
+        body.style.cssText = 'display:flex;flex-direction:column;gap:0.65rem;margin-top:0.25rem;';
+
+        function optBtn(title, desc, format) {
+          const b = document.createElement('button');
+          b.className = 'btn btn-ghost';
+          b.style.cssText = 'text-align:left;padding:0.75rem 1rem;border:1px solid var(--border);border-radius:var(--radius);width:100%;';
+          b.innerHTML = '<div style="font-weight:600;font-size:0.92rem;">' + title + '</div>' +
+            '<div style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;">' + desc + '</div>';
+          b.addEventListener('click', () => { closeModal(); printRoads(roadIds, format); });
+          return b;
+        }
+
+        body.appendChild(optBtn(
+          'Full A4',
+          'Cards stack vertically — each road takes as much space as it needs. Best for desk use or full-size printers.',
+          'a4'
+        ));
+        body.appendChild(optBtn(
+          'Pocket Cards  (4 per page)',
+          'A4 divided into 4 equal cards with cut lines. Print, cut, and carry in hand or pocket.',
+          'pocket'
+        ));
+
+        c.appendChild(body);
+        const footer = el('div','modal-footer');
+        footer.appendChild(btn('btn-ghost','Cancel', closeModal));
+        c.appendChild(footer);
+      });
+    }
+
+    function printRoads(roadIds, format) {
+      if (!roadIds || !roadIds.length) return;
+      format = format || 'a4';
 
       const now = new Date();
       const todayStr = now.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
-      // Get location name for document header
       const locationId = state.currentLocationId;
       const location = locationId && locationId !== '__ungrouped__'
         ? loadPlaces().find(p => p.id === locationId)
         : null;
       const locationName = location ? location.name : 'Road Visit Tracker';
 
-      // Build card HTML for each road
-      function buildCard(road) {
+      const roads = roadIds.map(id => loadRoads().find(r => r.id === id)).filter(Boolean);
+
+      // ── Shared: split addresses for a road ──────────────────
+      function splitAddresses(road) {
         const addresses = loadAddresses().filter(a => a.roadId === road.id);
         const odd = [], even = [], other = [];
         addresses.forEach(a => {
@@ -490,9 +528,12 @@
         });
         odd.sort((a, b) => (parseAddressNumber(a) || 0) - (parseAddressNumber(b) || 0));
         even.sort((a, b) => (parseAddressNumber(a) || 0) - (parseAddressNumber(b) || 0));
-        // non-numeric go at the end of odd column
-        const oddAll = [...odd, ...other];
+        return { oddAll: [...odd, ...other], even };
+      }
 
+      // ── Full A4 format ───────────────────────────────────────
+      function buildA4Card(road) {
+        const { oddAll, even } = splitAddresses(road);
         function rows(addrs) {
           if (!addrs.length) return '<div style="font-size:0.78rem;color:#999;font-style:italic;">None</div>';
           return addrs.map(a =>
@@ -502,11 +543,7 @@
             '</div>'
           ).join('');
         }
-
-        const lastPrinted = road.lastPrintedAt
-          ? 'Last printed: ' + formatDate(road.lastPrintedAt)
-          : 'Never printed';
-
+        const lastPrinted = road.lastPrintedAt ? 'Last printed: ' + formatDate(road.lastPrintedAt) : 'Never printed';
         return '<div style="border:1.5px solid #000;border-radius:6px;padding:0.75rem 0.85rem;margin-bottom:1rem;page-break-inside:avoid;">' +
           '<div style="text-align:center;border-bottom:1px solid #ccc;padding-bottom:0.5rem;margin-bottom:0.6rem;">' +
             '<div style="font-size:1.05rem;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">' + road.name + '</div>' +
@@ -514,38 +551,78 @@
             '<div style="font-size:0.68rem;color:#888;margin-top:2px;">' + lastPrinted + '</div>' +
           '</div>' +
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">' +
-            '<div>' +
-              '<div style="font-size:0.68rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px;letter-spacing:0.08em;">— ODD SIDE —</div>' +
-              rows(oddAll) +
-            '</div>' +
-            '<div>' +
-              '<div style="font-size:0.68rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px;letter-spacing:0.08em;">— EVEN SIDE —</div>' +
-              rows(even) +
-            '</div>' +
+            '<div><div style="font-size:0.68rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px;letter-spacing:0.08em;">— ODD SIDE —</div>' + rows(oddAll) + '</div>' +
+            '<div><div style="font-size:0.68rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px;letter-spacing:0.08em;">— EVEN SIDE —</div>' + rows(even) + '</div>' +
           '</div>' +
         '</div>';
       }
 
-      const roads = roadIds.map(id => loadRoads().find(r => r.id === id)).filter(Boolean);
-      const cardsHtml = roads.map(buildCard).join('');
+      // ── Pocket Cards format (4 per A4 page) ─────────────────
+      function buildPocketCard(road) {
+        const { oddAll, even } = splitAddresses(road);
+        function rows(addrs) {
+          if (!addrs.length) return '<div style="font-size:0.6rem;color:#999;font-style:italic;">None</div>';
+          return addrs.map(a =>
+            '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px dotted #ccc;padding:2px 0;font-size:0.68rem;">' +
+            '<span>' + a + '</span>' +
+            '<span style="width:11px;height:11px;border:1.5px solid #333;border-radius:2px;display:inline-block;flex-shrink:0;"></span>' +
+            '</div>'
+          ).join('');
+        }
+        const lastPrinted = road.lastPrintedAt ? 'Last: ' + formatDate(road.lastPrintedAt) : 'Never printed';
+        return '<div class="pocket-card">' +
+          '<div style="text-align:center;border-bottom:1px solid #aaa;padding-bottom:3px;margin-bottom:4px;">' +
+            '<div style="font-size:0.8rem;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;">' + road.name + '</div>' +
+            (road.postcode ? '<div style="font-size:0.62rem;color:#555;">' + road.postcode + '</div>' : '') +
+            '<div style="font-size:0.55rem;color:#888;">' + lastPrinted + '</div>' +
+          '</div>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;flex:1;min-height:0;overflow:hidden;">' +
+            '<div><div style="font-size:0.55rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:2px;margin-bottom:3px;">ODD</div>' + rows(oddAll) + '</div>' +
+            '<div><div style="font-size:0.55rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:2px;margin-bottom:3px;">EVEN</div>' + rows(even) + '</div>' +
+          '</div>' +
+        '</div>';
+      }
 
-      const html = '<!DOCTYPE html><html lang="en"><head>' +
-        '<meta charset="UTF-8">' +
-        '<title>Road Visit Cards \u2014 ' + locationName + '</title>' +
-        '<style>' +
-          '@page { size: A4; margin: 1.5cm; }' +
-          'body { font-family: Georgia, "Times New Roman", serif; color: #000; background: #fff; margin: 0; }' +
-          '.doc-header { text-align: center; margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 2px solid #000; }' +
-          '@media print { .doc-header { display: none; } }' +
-        '</style>' +
-        '</head><body>' +
-        '<div class="doc-header">' +
-          '<div style="font-size:1.3rem;font-weight:bold;">' + locationName + '</div>' +
-          '<div style="font-size:0.82rem;color:#555;margin-top:4px;">Printed: ' + todayStr + '</div>' +
-        '</div>' +
-        cardsHtml +
-        '<script>window.onload = function() { window.print(); }<\/script>' +
-        '</body></html>';
+      // ── Build final HTML ─────────────────────────────────────
+      let html;
+      if (format === 'pocket') {
+        const pages = [];
+        for (let i = 0; i < roads.length; i += 4) pages.push(roads.slice(i, i + 4));
+        const pagesHtml = pages.map((pageRoads, idx) =>
+          '<div class="page' + (idx > 0 ? ' pb' : '') + '">' +
+            pageRoads.map(buildPocketCard).join('') +
+          '</div>'
+        ).join('');
+        html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
+          '<title>Pocket Cards \u2014 ' + locationName + '</title>' +
+          '<style>' +
+            '@page { size: A4 portrait; margin: 0.5cm; }' +
+            'body { margin:0; font-family:Georgia,serif; }' +
+            '.page { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:143mm 143mm; width:100%; height:287mm; box-sizing:border-box; }' +
+            '.pb { page-break-before:always; }' +
+            '.pocket-card { border:1.5px dashed #aaa; padding:0.4rem 0.5rem; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; }' +
+          '</style></head><body>' +
+          pagesHtml +
+          '<script>window.onload=function(){window.print();}<\/script>' +
+          '</body></html>';
+      } else {
+        const cardsHtml = roads.map(buildA4Card).join('');
+        html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
+          '<title>Road Visit Cards \u2014 ' + locationName + '</title>' +
+          '<style>' +
+            '@page { size: A4; margin: 1.5cm; }' +
+            'body { font-family:Georgia,"Times New Roman",serif; color:#000; background:#fff; margin:0; }' +
+            '.doc-header { text-align:center; margin-bottom:1.25rem; padding-bottom:0.75rem; border-bottom:2px solid #000; }' +
+            '@media print { .doc-header { display:none; } }' +
+          '</style></head><body>' +
+          '<div class="doc-header">' +
+            '<div style="font-size:1.3rem;font-weight:bold;">' + locationName + '</div>' +
+            '<div style="font-size:0.82rem;color:#555;margin-top:4px;">Printed: ' + todayStr + '</div>' +
+          '</div>' +
+          cardsHtml +
+          '<script>window.onload=function(){window.print();}<\/script>' +
+          '</body></html>';
+      }
 
       const win = window.open('', '_blank');
       if (!win) { _showToast('Pop-up blocked \u2014 please allow pop-ups for this page.', true); return; }
@@ -559,7 +636,6 @@
         _syncUpdateRoad(road.id, { last_printed_at: ts });
       });
 
-      // Re-render so road cards show updated last printed date
       if (state.view === 'roads') renderRoads();
     }
 
@@ -1048,7 +1124,7 @@
       printBtn.className = 'icon-btn';
       printBtn.title = 'Print this road';
       printBtn.textContent = '🖨';
-      printBtn.addEventListener('click', e => { e.stopPropagation(); printRoads([road.id]); });
+      printBtn.addEventListener('click', e => { e.stopPropagation(); openPrintFormatModal([road.id]); });
       acts.appendChild(printBtn); acts.appendChild(mapBtn); acts.appendChild(editBtn); acts.appendChild(delBtn);
 
       top.appendChild(nameWrap); top.appendChild(acts);
@@ -1152,7 +1228,7 @@
       listPrintBtn.className = 'icon-btn';
       listPrintBtn.title = 'Print this road';
       listPrintBtn.textContent = '🖨';
-      listPrintBtn.addEventListener('click', e => { e.stopPropagation(); printRoads([road.id]); });
+      listPrintBtn.addEventListener('click', e => { e.stopPropagation(); openPrintFormatModal([road.id]); });
       acts.insertBefore(listPrintBtn, acts.firstChild);
       acts.appendChild(editBtn); acts.appendChild(delBtn);
 
@@ -1340,7 +1416,7 @@
         const printSelBtn = document.createElement('button');
         printSelBtn.className = 'btn btn-ghost btn-sm';
         printSelBtn.textContent = '🖨 Print Selected (' + state.selectedRoadIds.size + ')';
-        printSelBtn.addEventListener('click', () => printRoads([...state.selectedRoadIds]));
+        printSelBtn.addEventListener('click', () => openPrintFormatModal([...state.selectedRoadIds]));
         acts.appendChild(printSelBtn);
       }
 
@@ -1423,7 +1499,7 @@
       addBtn.addEventListener('click', () => openAddAddressModal(state.currentRoadId));
       const addrPrintBtn = document.createElement('button');
       addrPrintBtn.className = 'btn btn-ghost'; addrPrintBtn.textContent = '🖨 Print';
-      addrPrintBtn.addEventListener('click', () => printRoads([state.currentRoadId]));
+      addrPrintBtn.addEventListener('click', () => openPrintFormatModal([state.currentRoadId]));
       const actionsDiv = document.createElement('div');
       actionsDiv.className = 'view-actions';
       actionsDiv.appendChild(addrPrintBtn);
