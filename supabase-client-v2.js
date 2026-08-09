@@ -925,7 +925,7 @@ const Locations = {
   async getPendingInvitesForMe(userEmail) {
     const { data, error } = await db
       .from('location_invites')
-      .select('*, places!location_id(id, name)')
+      .select('id, location_id, email, created_at')
       .eq('email', userEmail.toLowerCase().trim())
       .is('accepted_at', null)
       .is('deleted_at', null);
