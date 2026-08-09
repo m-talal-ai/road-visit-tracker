@@ -877,12 +877,12 @@ const Locations = {
   async getMembers(orgId) {
     const { data, error } = await db
       .from('organization_members')
-      .select('*, profiles!user_id(id, full_name, email, avatar_url)')
+      .select('user_id, role, created_at')
       .eq('org_id', orgId)
       .is('deleted_at', null)
       .order('created_at');
     if (error) throw error;
-    return data;
+    return data || [];
   },
 
   /** Remove a member from a location org */
