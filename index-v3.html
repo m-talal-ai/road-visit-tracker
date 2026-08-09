@@ -464,6 +464,105 @@
       setTimeout(() => t.remove(), 4000);
     }
 
+    /* ── Print Roads ──────────────────────────────────────── */
+    function printRoads(roadIds) {
+      if (!roadIds || !roadIds.length) return;
+
+      const now = new Date();
+      const todayStr = now.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+      // Get location name for document header
+      const locationId = state.currentLocationId;
+      const location = locationId && locationId !== '__ungrouped__'
+        ? loadPlaces().find(p => p.id === locationId)
+        : null;
+      const locationName = location ? location.name : 'Road Visit Tracker';
+
+      // Build card HTML for each road
+      function buildCard(road) {
+        const addresses = loadAddresses().filter(a => a.roadId === road.id);
+        const odd = [], even = [], other = [];
+        addresses.forEach(a => {
+          const n = parseAddressNumber(a.address);
+          if (n === null) other.push(a.address);
+          else if (n % 2 === 0) even.push(a.address);
+          else odd.push(a.address);
+        });
+        odd.sort((a, b) => (parseAddressNumber(a) || 0) - (parseAddressNumber(b) || 0));
+        even.sort((a, b) => (parseAddressNumber(a) || 0) - (parseAddressNumber(b) || 0));
+        // non-numeric go at the end of odd column
+        const oddAll = [...odd, ...other];
+
+        function rows(addrs) {
+          if (!addrs.length) return '<div style="font-size:0.78rem;color:#999;font-style:italic;">None</div>';
+          return addrs.map(a =>
+            '<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px dotted #ccc;padding:3px 0;font-size:0.85rem;">' +
+            '<span>' + a + '</span>' +
+            '<span style="width:14px;height:14px;border:1.5px solid #333;border-radius:2px;display:inline-block;flex-shrink:0;"></span>' +
+            '</div>'
+          ).join('');
+        }
+
+        const lastPrinted = road.lastPrintedAt
+          ? 'Last printed: ' + formatDate(road.lastPrintedAt)
+          : 'Never printed';
+
+        return '<div style="border:1.5px solid #000;border-radius:6px;padding:0.75rem 0.85rem;margin-bottom:1rem;page-break-inside:avoid;">' +
+          '<div style="text-align:center;border-bottom:1px solid #ccc;padding-bottom:0.5rem;margin-bottom:0.6rem;">' +
+            '<div style="font-size:1.05rem;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;">' + road.name + '</div>' +
+            (road.postcode ? '<div style="font-size:0.78rem;color:#555;margin-top:2px;">' + road.postcode + '</div>' : '') +
+            '<div style="font-size:0.68rem;color:#888;margin-top:2px;">' + lastPrinted + '</div>' +
+          '</div>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">' +
+            '<div>' +
+              '<div style="font-size:0.68rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px;letter-spacing:0.08em;">— ODD SIDE —</div>' +
+              rows(oddAll) +
+            '</div>' +
+            '<div>' +
+              '<div style="font-size:0.68rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:3px;margin-bottom:5px;letter-spacing:0.08em;">— EVEN SIDE —</div>' +
+              rows(even) +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }
+
+      const roads = roadIds.map(id => loadRoads().find(r => r.id === id)).filter(Boolean);
+      const cardsHtml = roads.map(buildCard).join('');
+
+      const html = '<!DOCTYPE html><html lang="en"><head>' +
+        '<meta charset="UTF-8">' +
+        '<title>Road Visit Cards \u2014 ' + locationName + '</title>' +
+        '<style>' +
+          '@page { size: A4; margin: 1.5cm; }' +
+          'body { font-family: Georgia, "Times New Roman", serif; color: #000; background: #fff; margin: 0; }' +
+          '.doc-header { text-align: center; margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 2px solid #000; }' +
+          '@media print { .doc-header { display: none; } }' +
+        '</style>' +
+        '</head><body>' +
+        '<div class="doc-header">' +
+          '<div style="font-size:1.3rem;font-weight:bold;">' + locationName + '</div>' +
+          '<div style="font-size:0.82rem;color:#555;margin-top:4px;">Printed: ' + todayStr + '</div>' +
+        '</div>' +
+        cardsHtml +
+        '<script>window.onload = function() { window.print(); }<\/script>' +
+        '</body></html>';
+
+      const win = window.open('', '_blank');
+      if (!win) { _showToast('Pop-up blocked \u2014 please allow pop-ups for this page.', true); return; }
+      win.document.write(html);
+      win.document.close();
+
+      // Update lastPrintedAt in cache + Supabase for each printed road
+      const ts = now.toISOString();
+      roads.forEach(road => {
+        road.lastPrintedAt = ts;
+        _syncUpdateRoad(road.id, { last_printed_at: ts });
+      });
+
+      // Re-render so road cards show updated last printed date
+      if (state.view === 'roads') renderRoads();
+    }
+
     /* ── Supabase sync helpers (fire-and-forget, toast on error) ─ */
     async function _syncWrite(fn) {
       try { await fn(); }
@@ -590,6 +689,7 @@
       viewMode:         'grid',     // 'grid' | 'list'
       roadSort:         'last_visited_desc', // 'last_visited_desc'|'last_visited_asc'|'name_asc'
       search:           '',
+      selectedRoadIds:  new Set(),  // roads selected for printing
     };
 
     /* ── Navigation ───────────────────────────────────────── */
@@ -600,11 +700,13 @@
 
     function navigateToRoot() {
       state.placeStack = []; state.currentPlaceId = null;
+      state.selectedRoadIds.clear();
       state.view = 'places'; clearSearch(); render();
     }
 
     function navigateIntoPlace(place) {
       state.placeStack.push({ id:place.id, type:place.type, name:place.name });
+      state.selectedRoadIds.clear();
       clearSearch();
       if (place.type === 'location') {
         state.view = 'roads'; state.currentLocationId = place.id;
@@ -623,6 +725,7 @@
     function navigateIntoRoad(road) {
       state.placeStack.push({ id:road.id, type:'road', name:road.name });
       state.currentRoadId = road.id;
+      state.selectedRoadIds.clear();
       state.view = 'addresses'; clearSearch(); render();
     }
 
@@ -631,6 +734,7 @@
       if (idx < 0) { navigateToRoot(); return; }
       const target = state.placeStack[idx];
       state.placeStack = state.placeStack.slice(0, idx + 1);
+      state.selectedRoadIds.clear();
       clearSearch();
       if (target.type === 'road') {
         state.view = 'addresses'; state.currentRoadId = target.id;
@@ -939,7 +1043,13 @@
       const delBtn = document.createElement('button');
       delBtn.className = 'icon-btn del'; delBtn.title = 'Delete'; delBtn.textContent = '🗑';
       delBtn.addEventListener('click', e => { e.stopPropagation(); deleteRoad(road.id); });
-      acts.appendChild(mapBtn); acts.appendChild(editBtn); acts.appendChild(delBtn);
+      // Print icon button
+      const printBtn = document.createElement('button');
+      printBtn.className = 'icon-btn';
+      printBtn.title = 'Print this road';
+      printBtn.textContent = '🖨';
+      printBtn.addEventListener('click', e => { e.stopPropagation(); printRoads([road.id]); });
+      acts.appendChild(printBtn); acts.appendChild(mapBtn); acts.appendChild(editBtn); acts.appendChild(delBtn);
 
       top.appendChild(nameWrap); top.appendChild(acts);
 
@@ -967,6 +1077,25 @@
         });
         card.appendChild(tagsRow);
       }
+
+      // Checkbox for multi-select print
+      const cbWrap = document.createElement('label');
+      cbWrap.style.cssText = 'position:absolute;top:0.5rem;left:0.5rem;z-index:2;cursor:pointer;';
+      cbWrap.title = 'Select for printing';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = state.selectedRoadIds.has(road.id);
+      cb.addEventListener('change', e => {
+        e.stopPropagation();
+        if (cb.checked) state.selectedRoadIds.add(road.id);
+        else state.selectedRoadIds.delete(road.id);
+        renderRoads();
+      });
+      cb.addEventListener('click', e => e.stopPropagation());
+      cbWrap.appendChild(cb);
+      card.style.position = 'relative';
+      card.style.paddingTop = '1.75rem';
+      card.insertBefore(cbWrap, card.firstChild);
 
       card.addEventListener('click', () => navigateIntoRoad(road));
       return card;
@@ -1018,7 +1147,29 @@
       const delBtn = document.createElement('button');
       delBtn.className = 'icon-btn del'; delBtn.title = 'Delete'; delBtn.textContent = '🗑';
       delBtn.addEventListener('click', e => { e.stopPropagation(); deleteRoad(road.id); });
+      // Print icon button
+      const listPrintBtn = document.createElement('button');
+      listPrintBtn.className = 'icon-btn';
+      listPrintBtn.title = 'Print this road';
+      listPrintBtn.textContent = '🖨';
+      listPrintBtn.addEventListener('click', e => { e.stopPropagation(); printRoads([road.id]); });
+      acts.insertBefore(listPrintBtn, acts.firstChild);
       acts.appendChild(editBtn); acts.appendChild(delBtn);
+
+      // Checkbox for multi-select print
+      const listCb = document.createElement('input');
+      listCb.type = 'checkbox';
+      listCb.checked = state.selectedRoadIds.has(road.id);
+      listCb.style.cssText = 'margin-right:0.5rem;flex-shrink:0;cursor:pointer;';
+      listCb.title = 'Select for printing';
+      listCb.addEventListener('change', e => {
+        e.stopPropagation();
+        if (listCb.checked) state.selectedRoadIds.add(road.id);
+        else state.selectedRoadIds.delete(road.id);
+        renderRoads();
+      });
+      listCb.addEventListener('click', e => e.stopPropagation());
+      item.insertBefore(listCb, item.firstChild);
 
       item.appendChild(sub); item.appendChild(acts);
       item.addEventListener('click', () => navigateIntoRoad(road));
@@ -1169,6 +1320,30 @@
         acts.appendChild(tagsBtn);
       }
 
+      // Select All toggle
+      const allRoadsForSel = isUngrouped
+        ? loadRoads().filter(r => !r.locationId)
+        : loadRoads().filter(r => r.locationId === locationId);
+      const allSelected = allRoadsForSel.length > 0 && allRoadsForSel.every(r => state.selectedRoadIds.has(r.id));
+      const selAllBtn = document.createElement('button');
+      selAllBtn.className = 'btn btn-ghost btn-sm';
+      selAllBtn.textContent = allSelected ? 'Deselect All' : 'Select All';
+      selAllBtn.addEventListener('click', () => {
+        if (allSelected) allRoadsForSel.forEach(r => state.selectedRoadIds.delete(r.id));
+        else allRoadsForSel.forEach(r => state.selectedRoadIds.add(r.id));
+        renderRoads();
+      });
+      acts.appendChild(selAllBtn);
+
+      // Print Selected button (only visible when roads are selected)
+      if (state.selectedRoadIds.size > 0) {
+        const printSelBtn = document.createElement('button');
+        printSelBtn.className = 'btn btn-ghost btn-sm';
+        printSelBtn.textContent = '🖨 Print Selected (' + state.selectedRoadIds.size + ')';
+        printSelBtn.addEventListener('click', () => printRoads([...state.selectedRoadIds]));
+        acts.appendChild(printSelBtn);
+      }
+
       const dlBtn = document.createElement('button');
       dlBtn.className = 'btn btn-ghost btn-sm'; dlBtn.textContent = 'Download Template';
       dlBtn.addEventListener('click', downloadTemplate);
@@ -1246,7 +1421,14 @@
       const addBtn = document.createElement('button');
       addBtn.className = 'btn btn-primary'; addBtn.textContent = '+ Add Address';
       addBtn.addEventListener('click', () => openAddAddressModal(state.currentRoadId));
-      hdr.appendChild(titleDiv); hdr.appendChild(addBtn);
+      const addrPrintBtn = document.createElement('button');
+      addrPrintBtn.className = 'btn btn-ghost'; addrPrintBtn.textContent = '🖨 Print';
+      addrPrintBtn.addEventListener('click', () => printRoads([state.currentRoadId]));
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'view-actions';
+      actionsDiv.appendChild(addrPrintBtn);
+      actionsDiv.appendChild(addBtn);
+      hdr.appendChild(titleDiv); hdr.appendChild(actionsDiv);
 
       // Number grid
       const container = document.getElementById('number-grid-container');
@@ -1668,113 +1850,150 @@
       });
     }
 
-    /* ── Members storage helpers ─────────────────────────── */
-    function loadMembers(locationId) {
-      return JSON.parse(localStorage.getItem('rvt_members_' + locationId) || '[]');
-    }
-    function saveMembers(locationId, list) {
-      localStorage.setItem('rvt_members_' + locationId, JSON.stringify(list));
-    }
-
     /* ── Admin: Members Modal ────────────────────────────── */
     function openMembersModal(locationId) {
       const location = loadPlaces().find(p => p.id === locationId);
-      openModal(c => {
+      openModal(async c => {
         c.appendChild(el('h3','modal-title','👥 Members — ' + (location?.name || '')));
 
-        // Combined member list: manually added + approved join requests
-        function getAllMembers() {
-          const manual = loadMembers(locationId);
-          const approved = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]')
-            .filter(r => r.locationId === locationId && r.status === 'approved' && r.userName)
-            .map(r => r.userName);
-          return [...new Set([...manual, ...approved])];
+        // Loading state
+        const body = el('div', '');
+        body.appendChild(el('div','osm-status','Loading members…'));
+        c.appendChild(body);
+
+        const orgId = location?.orgId || null;
+        const Loc = window._rvtLocations;
+
+        // Load members + pending invites from Supabase in parallel
+        let members = [], invites = [];
+        try {
+          [members, invites] = await Promise.all([
+            orgId ? Loc.getMembers(orgId) : Promise.resolve([]),
+            Loc.getInvites(locationId),
+          ]);
+        } catch (e) {
+          body.innerHTML = '';
+          body.appendChild(el('div','osm-status','Could not load members: ' + (e.message || 'error')));
+          const footer = el('div','modal-footer');
+          footer.appendChild(btn('btn-ghost','Close', closeModal));
+          c.appendChild(footer);
+          return;
         }
 
-        const listEl = el('div','osm-results');
-        listEl.style.maxHeight = '260px';
+        body.innerHTML = '';
 
-        function refreshList() {
-          listEl.innerHTML = '';
-          const all = getAllMembers();
-          if (!all.length) {
-            listEl.appendChild(el('div','osm-status','No members yet. Add one below or approve join requests.'));
-            return;
-          }
-          all.forEach(name => {
+        // ── Accepted members ──
+        if (members.length) {
+          body.appendChild(el('div','modal-label','Members'));
+          const listEl = el('div','osm-results');
+          listEl.style.maxHeight = '180px';
+          members.forEach(m => {
+            const name = m.profiles?.full_name || m.profiles?.email || m.user_id;
+            const isOwner = m.role === 'owner';
             const row = el('div','join-result-card');
             row.style.marginBottom = '0.4rem';
             const info = el('div','join-result-info');
-            info.appendChild(el('div','join-result-name', name));
-            const removeBtn = btn('btn-danger btn-sm','Remove', () => {
-              const manual = loadMembers(locationId).filter(m => m !== name);
-              saveMembers(locationId, manual);
-              // Also mark join request as removed
-              const reqs = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
-              const idx = reqs.findIndex(r => r.locationId === locationId && r.userName === name);
-              if (idx !== -1) { reqs[idx].status = 'removed'; localStorage.setItem('rvt_join_requests', JSON.stringify(reqs)); }
-              refreshList();
-            });
-            row.appendChild(info); row.appendChild(removeBtn);
+            info.appendChild(el('div','join-result-name', name + (isOwner ? ' (owner)' : '')));
+            if (m.profiles?.email && m.profiles.email !== name) {
+              info.appendChild(el('div','join-result-addr', m.profiles.email));
+            }
+            row.appendChild(info);
+            if (!isOwner && orgId) {
+              const removeBtn = btn('btn-danger btn-sm','Remove', async () => {
+                try {
+                  await Loc.removeMember(orgId, m.user_id);
+                  row.remove();
+                } catch(e) { _showToast('Could not remove member: ' + (e.message || 'error'), true); }
+              });
+              row.appendChild(removeBtn);
+            }
             listEl.appendChild(row);
           });
+          body.appendChild(listEl);
         }
-        refreshList();
-        c.appendChild(listEl);
 
-        // ── Invite by email + shareable link ──
-        c.appendChild(el('div','modal-label','Invite Someone'));
+        // ── Pending invites ──
+        const pending = invites.filter(i => !i.accepted_at);
+        if (pending.length) {
+          body.appendChild(el('div','modal-label','Pending Invites'));
+          const invListEl = el('div','osm-results');
+          invListEl.style.maxHeight = '140px';
+          pending.forEach(inv => {
+            const row = el('div','join-result-card');
+            row.style.marginBottom = '0.4rem';
+            const info = el('div','join-result-info');
+            info.appendChild(el('div','join-result-name', inv.email));
+            info.appendChild(el('div','join-result-addr', 'Invited ' + new Date(inv.created_at).toLocaleDateString()));
+            const removeBtn = btn('btn-ghost btn-sm','Cancel', async () => {
+              try {
+                await Loc.removeInvite(locationId, inv.email);
+                row.remove();
+              } catch(e) { _showToast('Could not cancel invite: ' + (e.message || 'error'), true); }
+            });
+            row.appendChild(info); row.appendChild(removeBtn);
+            invListEl.appendChild(row);
+          });
+          body.appendChild(invListEl);
+        }
 
-        // Build join token from location data
-        const locSnapshot = {
-          id:                location.id,
-          orgId:             location.orgId   || null,
-          name:              location.name,
-          locationType:      location.locationType || 'custom',
-          locationTypeLabel: location.locationTypeLabel || null,
-          country:           location.country || '',
-          city:              location.city    || '',
-          town:              location.town    || '',
-          address:           location.address || '',
-        };
-        const joinToken  = btoa(unescape(encodeURIComponent(JSON.stringify(locSnapshot))));
-        const loginBase  = window.location.origin + window.location.pathname.replace(/[^/]*$/, 'login-v2.html');
-        const joinUrl    = loginBase + '?join=' + joinToken;
+        if (!members.length && !pending.length) {
+          body.appendChild(el('div','osm-status','No members yet. Add someone below.'));
+        }
 
-        const inviteRow = el('div','settings-add-row');
-        const emailIn   = document.createElement('input');
+        // ── Add member by email ──
+        body.appendChild(el('div','modal-label','Add Member by Email'));
+        const addRow = el('div','settings-add-row');
+        const emailIn = document.createElement('input');
         emailIn.className = 'modal-input'; emailIn.type = 'email';
-        emailIn.placeholder = 'Their email (optional — for your records)';
+        emailIn.placeholder = 'their@email.com';
 
-        const getBtn = btn('btn-primary btn-sm','Get Invite Link', () => {
+        const addBtn2 = btn('btn-primary btn-sm','Add', async () => {
           const email = emailIn.value.trim();
-          if (email) {
-            const manual = loadMembers(locationId);
-            if (!getAllMembers().includes(email)) { manual.push(email); saveMembers(locationId, manual); refreshList(); }
+          if (!email || !email.includes('@')) { _showToast('Enter a valid email address.', true); return; }
+          try {
+            await Loc.inviteByEmail(locationId, orgId, email);
+            emailIn.value = '';
+            _showToast('✓ ' + email + ' added — they\'ll see this location when they log in.');
+            // Add to pending list immediately
+            const pendingSection = body.querySelector('[data-pending-list]');
+            const newRow = el('div','join-result-card');
+            newRow.style.marginBottom = '0.4rem';
+            const info = el('div','join-result-info');
+            info.appendChild(el('div','join-result-name', email));
+            info.appendChild(el('div','join-result-addr', 'Just invited'));
+            newRow.appendChild(info);
+            if (pendingSection) { pendingSection.appendChild(newRow); }
+          } catch(e) {
+            _showToast('Could not add member: ' + (e.message || 'error'), true);
           }
-          linkBox.classList.remove('hidden');
-          linkIn.focus(); linkIn.select();
         });
-        inviteRow.appendChild(emailIn); inviteRow.appendChild(getBtn);
-        c.appendChild(inviteRow);
+        addRow.appendChild(emailIn); addRow.appendChild(addBtn2);
+        body.appendChild(addRow);
 
-        // Link box (hidden until "Get Invite Link" clicked)
-        const linkBox = el('div','hidden');
-        linkBox.style.marginTop = '0.65rem';
-        linkBox.appendChild(el('div','modal-label','Share this link — they sign up, they join automatically'));
+        body.appendChild(el('div','find-location-sep','Or share an invite link (optional):'));
+
+        // Keep existing invite link as secondary option
+        const locSnapshot = {
+          id: location.id, orgId: location.orgId || null,
+          name: location.name, locationType: location.locationType || 'custom',
+          locationTypeLabel: location.locationTypeLabel || null,
+          country: location.country || '', city: location.city || '',
+          town: location.town || '', address: location.address || '',
+        };
+        const joinToken = btoa(unescape(encodeURIComponent(JSON.stringify(locSnapshot))));
+        const loginBase = window.location.origin + window.location.pathname.replace(/[^/]*$/, 'login-v2.html');
+        const joinUrl   = loginBase + '?join=' + joinToken;
         const linkRow = el('div','settings-add-row');
         const linkIn  = document.createElement('input');
         linkIn.className = 'modal-input'; linkIn.type = 'text';
-        linkIn.value = joinUrl; linkIn.readOnly = true;
-        linkIn.style.fontSize = '0.72rem';
-        const copyBtn = btn('btn-ghost btn-sm','📋 Copy', () => {
+        linkIn.value = joinUrl; linkIn.readOnly = true; linkIn.style.fontSize = '0.72rem';
+        const copyBtn2 = btn('btn-ghost btn-sm','📋 Copy', () => {
           navigator.clipboard.writeText(joinUrl)
-            .then(() => { copyBtn.textContent = '✓ Copied!'; setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 2000); })
-            .catch(() => { linkIn.select(); document.execCommand('copy'); copyBtn.textContent = '✓ Copied!'; setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 2000); });
+            .then(() => { copyBtn2.textContent = '✓ Copied!'; setTimeout(() => { copyBtn2.textContent = '📋 Copy'; }, 2000); })
+            .catch(() => { linkIn.select(); document.execCommand('copy'); });
         });
-        linkRow.appendChild(linkIn); linkRow.appendChild(copyBtn);
-        linkBox.appendChild(linkRow);
-        c.appendChild(linkBox);
+        linkRow.appendChild(linkIn); linkRow.appendChild(copyBtn2);
+        body.appendChild(linkRow);
 
         const footer = el('div','modal-footer');
         footer.appendChild(btn('btn-ghost','Close', closeModal));
@@ -1803,11 +2022,15 @@
             info.appendChild(el('div','join-result-name', r.userName || 'User'));
             info.appendChild(el('div','join-result-addr', 'Requested ' + new Date(r.createdAt).toLocaleDateString()));
             const approveBtn = btn('btn-primary btn-sm','Approve', () => {
-              updateJoinRequest(r.id, 'approved');
+              const all = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+              const idx = all.findIndex(req => req.id === r.id);
+              if (idx !== -1) { all[idx].status = 'approved'; all[idx].reviewedAt = new Date().toISOString(); localStorage.setItem('rvt_join_requests', JSON.stringify(all)); }
               closeModal(); render();
             });
             const rejectBtn = btn('btn-danger btn-sm','Reject', () => {
-              updateJoinRequest(r.id, 'rejected');
+              const all = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
+              const idx = all.findIndex(req => req.id === r.id);
+              if (idx !== -1) { all[idx].status = 'rejected'; all[idx].reviewedAt = new Date().toISOString(); localStorage.setItem('rvt_join_requests', JSON.stringify(all)); }
               closeModal(); render();
             });
             const btnWrap = el('div','card-actions');
@@ -1822,16 +2045,6 @@
         footer.appendChild(btn('btn-ghost','Close', closeModal));
         c.appendChild(footer);
       });
-    }
-
-    function updateJoinRequest(id, status) {
-      const all = JSON.parse(localStorage.getItem('rvt_join_requests') || '[]');
-      const idx = all.findIndex(r => r.id === id);
-      if (idx !== -1) {
-        all[idx].status = status;
-        all[idx].reviewedAt = new Date().toISOString();
-        localStorage.setItem('rvt_join_requests', JSON.stringify(all));
-      }
     }
 
     /* ── New Road Modal ───────────────────────────────────── */
@@ -2766,9 +2979,10 @@
       document.getElementById('user-email').textContent = fullName || email;
       window._rvtAuthUser = { name: fullName, email };
 
-      // Expose db + userId so IIFE sync helpers can use them
-      window._rvtDb     = db;
-      window._rvtUserId = session.user.id;
+      // Expose db + userId + Locations so IIFE helpers can use them
+      window._rvtDb        = db;
+      window._rvtUserId    = session.user.id;
+      window._rvtLocations = Locations;
 
       // Capture join token from URL (already-logged-in users land here directly)
       const urlJoin = new URLSearchParams(window.location.search).get('join');
@@ -2780,19 +2994,48 @@
       // Load all data then render
       await initCache();
 
-      // Process pending join invite
+      // ── Process email-based invites ──────────────────────────
+      try {
+        const userEmail = session.user.email || '';
+        if (userEmail) {
+          const pendingInvites = await Locations.getPendingInvitesForMe(userEmail);
+          if (pendingInvites.length) {
+            let joinedAny = false;
+            for (const invite of pendingInvites) {
+              try {
+                const { error } = await db.rpc('fn_join_location', { p_place_id: invite.location_id });
+                if (error) throw error;
+                await Locations.acceptInvite(invite.location_id, userEmail);
+                joinedAny = true;
+              } catch (joinErr) {
+                console.error('Could not join location:', invite.location_id, joinErr);
+              }
+            }
+            if (joinedAny) {
+              await initCache();
+              const firstName = pendingInvites[0]?.places?.name || '';
+              if (window._rvtShowToast) window._rvtShowToast('✓ Joined ' + (firstName ? '"' + firstName + '"' : 'your location') + '!');
+              // Navigate to first joined location
+              const firstId = pendingInvites[0]?.location_id;
+              const joined = window._rvtCache?.places?.find(p => p.id === firstId);
+              if (joined && window._rvtOpenLocation) window._rvtOpenLocation(joined.id);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Invite check failed:', e);
+      }
+
+      // ── Legacy: process URL/localStorage join token (backwards compat) ──
       const pendingJoin = localStorage.getItem('rvt_pending_join');
       if (pendingJoin) {
         localStorage.removeItem('rvt_pending_join');
         try {
           const locData = JSON.parse(decodeURIComponent(escape(atob(pendingJoin))));
-          // Use place id — fn_join_location now accepts place_id and creates org if needed
           const { error } = await db.rpc('fn_join_location', { p_place_id: locData.id });
           if (error) throw error;
-          // Reload cache — user is now a member and can see the location's data
           await initCache();
           if (window._rvtShowToast) window._rvtShowToast('✓ Joined "' + locData.name + '"!');
-          // Navigate straight to the joined location's roads view
           const joined = window._rvtCache?.places?.find(p => p.id === locData.id);
           if (joined && window._rvtOpenLocation) window._rvtOpenLocation(joined.id);
         } catch(e) {
@@ -2838,6 +3081,7 @@
         lat: r.lat, lng: r.lng,
         country: r.country || '', city: r.city || '', town: r.town || '',
         createdAt: r.created_at,
+        lastPrintedAt: r.last_printed_at || null,
         tags: [],  // populated from tag assignments below
       };
     }
