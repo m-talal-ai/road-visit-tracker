@@ -877,7 +877,7 @@ const Locations = {
   async getMembers(orgId) {
     const { data, error } = await db
       .from('organization_members')
-      .select('user_id, role, created_at')
+      .select('user_id, role, created_at, profiles!user_id(full_name, email)')
       .eq('org_id', orgId)
       .is('deleted_at', null)
       .order('created_at');

@@ -1889,10 +1889,14 @@
           listEl.style.maxHeight = '180px';
           members.forEach(m => {
             const isOwner = m.role === 'owner';
+            const displayName = m.profiles?.full_name || m.profiles?.email || (isOwner ? 'Owner' : 'Member');
             const row = el('div','join-result-card');
             row.style.marginBottom = '0.4rem';
             const info = el('div','join-result-info');
-            info.appendChild(el('div','join-result-name', (isOwner ? 'Owner' : 'Member') + ' · joined ' + new Date(m.created_at).toLocaleDateString()));
+            info.appendChild(el('div','join-result-name', displayName + (isOwner ? ' (owner)' : '')));
+            if (m.profiles?.email && m.profiles.email !== displayName) {
+              info.appendChild(el('div','join-result-addr', m.profiles.email));
+            }
             row.appendChild(info);
             if (!isOwner && orgId) {
               const removeBtn = btn('btn-danger btn-sm','Remove', async () => {
