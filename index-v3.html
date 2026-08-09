@@ -562,9 +562,25 @@
         '</div>';
       }
 
-      // ── Pocket Cards format (4 per A4 page) ─────────────────
-      function buildPocketCard(road) {
+      // ── Shared: split one road into continuation card specs ──
+      function getRoadCards(road, maxPerCol) {
         const { oddAll, even } = splitAddresses(road);
+        const parts = Math.max(Math.ceil(oddAll.length / maxPerCol) || 1, Math.ceil(even.length / maxPerCol) || 1);
+        const cards = [];
+        for (let i = 0; i < parts; i++) {
+          cards.push({
+            road,
+            oddSlice: oddAll.slice(i * maxPerCol, (i + 1) * maxPerCol),
+            evenSlice: even.slice(i * maxPerCol, (i + 1) * maxPerCol),
+            label: parts > 1 ? ' (' + (i + 1) + '/' + parts + ')' : '',
+          });
+        }
+        return cards;
+      }
+
+      // ── Pocket Cards format (4 per A4 page) ─────────────────
+      function buildPocketCard(spec) {
+        const { road, oddSlice, evenSlice, label } = spec;
         function rows(addrs) {
           if (!addrs.length) return '<div style="font-size:0.6rem;color:#999;font-style:italic;">None</div>';
           return addrs.map(a =>
@@ -577,20 +593,20 @@
         const lastPrinted = road.lastPrintedAt ? 'Last: ' + formatDate(road.lastPrintedAt) : 'Never printed';
         return '<div class="pocket-card">' +
           '<div style="text-align:center;border-bottom:1px solid #aaa;padding-bottom:3px;margin-bottom:4px;">' +
-            '<div style="font-size:0.8rem;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;">' + road.name + '</div>' +
+            '<div style="font-size:0.8rem;font-weight:bold;text-transform:uppercase;letter-spacing:0.04em;">' + road.name + label + '</div>' +
             (road.postcode ? '<div style="font-size:0.62rem;color:#555;">' + road.postcode + '</div>' : '') +
             '<div style="font-size:0.55rem;color:#888;">' + lastPrinted + '</div>' +
           '</div>' +
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;flex:1;min-height:0;overflow:hidden;">' +
-            '<div><div style="font-size:0.55rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:2px;margin-bottom:3px;">ODD</div>' + rows(oddAll) + '</div>' +
-            '<div><div style="font-size:0.55rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:2px;margin-bottom:3px;">EVEN</div>' + rows(even) + '</div>' +
+            '<div><div style="font-size:0.55rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:2px;margin-bottom:3px;">ODD</div>' + rows(oddSlice) + '</div>' +
+            '<div><div style="font-size:0.55rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:2px;margin-bottom:3px;">EVEN</div>' + rows(evenSlice) + '</div>' +
           '</div>' +
         '</div>';
       }
 
       // ── Mini Cards format (8 per A4 page, 2 col × 4 row) ───
-      function buildMiniCard(road) {
-        const { oddAll, even } = splitAddresses(road);
+      function buildMiniCard(spec) {
+        const { road, oddSlice, evenSlice, label } = spec;
         function rows(addrs) {
           if (!addrs.length) return '<div style="font-size:0.52rem;color:#999;font-style:italic;">None</div>';
           return addrs.map(a =>
@@ -602,12 +618,12 @@
         }
         return '<div class="mini-card">' +
           '<div style="text-align:center;border-bottom:1px solid #aaa;padding-bottom:2px;margin-bottom:3px;">' +
-            '<div style="font-size:0.65rem;font-weight:bold;text-transform:uppercase;letter-spacing:0.03em;line-height:1.2;">' + road.name + '</div>' +
+            '<div style="font-size:0.65rem;font-weight:bold;text-transform:uppercase;letter-spacing:0.03em;line-height:1.2;">' + road.name + label + '</div>' +
             (road.postcode ? '<div style="font-size:0.52rem;color:#555;">' + road.postcode + '</div>' : '') +
           '</div>' +
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem;flex:1;min-height:0;overflow:hidden;">' +
-            '<div><div style="font-size:0.48rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:1px;margin-bottom:2px;">ODD</div>' + rows(oddAll) + '</div>' +
-            '<div><div style="font-size:0.48rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:1px;margin-bottom:2px;">EVEN</div>' + rows(even) + '</div>' +
+            '<div><div style="font-size:0.48rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:1px;margin-bottom:2px;">ODD</div>' + rows(oddSlice) + '</div>' +
+            '<div><div style="font-size:0.48rem;font-weight:bold;text-transform:uppercase;text-align:center;border-bottom:1px solid #ccc;padding-bottom:1px;margin-bottom:2px;">EVEN</div>' + rows(evenSlice) + '</div>' +
           '</div>' +
         '</div>';
       }
@@ -615,11 +631,12 @@
       // ── Build final HTML ─────────────────────────────────────
       let html;
       if (format === 'mini') {
+        const allCards = roads.flatMap(r => getRoadCards(r, 8)); // 8 per col = 16 addresses per mini card
         const pages = [];
-        for (let i = 0; i < roads.length; i += 8) pages.push(roads.slice(i, i + 8));
-        const pagesHtml = pages.map((pageRoads, idx) =>
+        for (let i = 0; i < allCards.length; i += 8) pages.push(allCards.slice(i, i + 8));
+        const pagesHtml = pages.map((pageCards, idx) =>
           '<div class="page' + (idx > 0 ? ' pb' : '') + '">' +
-            pageRoads.map(buildMiniCard).join('') +
+            pageCards.map(buildMiniCard).join('') +
           '</div>'
         ).join('');
         html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
@@ -635,11 +652,12 @@
           '<script>window.onload=function(){window.print();}<\/script>' +
           '</body></html>';
       } else if (format === 'pocket') {
+        const allCards = roads.flatMap(r => getRoadCards(r, 14)); // 14 per col = 28 addresses per pocket card
         const pages = [];
-        for (let i = 0; i < roads.length; i += 4) pages.push(roads.slice(i, i + 4));
-        const pagesHtml = pages.map((pageRoads, idx) =>
+        for (let i = 0; i < allCards.length; i += 4) pages.push(allCards.slice(i, i + 4));
+        const pagesHtml = pages.map((pageCards, idx) =>
           '<div class="page' + (idx > 0 ? ' pb' : '') + '">' +
-            pageRoads.map(buildPocketCard).join('') +
+            pageCards.map(buildPocketCard).join('') +
           '</div>'
         ).join('');
         html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
