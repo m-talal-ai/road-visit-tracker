@@ -773,7 +773,7 @@
       const orgId = place?.orgId || null;
       _syncWrite(() => window._rvtDb.from('addresses').insert({
         id: a.id, road_id: a.roadId, address: a.address,
-        org_id: orgId,
+        org_id: orgId, metadata: a.metadata || {},
         owner_id: window._rvtUserId, created_by: window._rvtUserId,
       }).then(r => { if (r.error) throw r.error; }));
     }
@@ -2619,6 +2619,14 @@
         c.appendChild(el('div','addr-panel-number', addr ? addr.address : ''));
         c.appendChild(el('div','addr-panel-road', road ? road.name + (road.postcode ? ' · ' + road.postcode : '') : ''));
 
+        // Notes (from CSV import metadata, only shown when present)
+        if (addr && addr.metadata && addr.metadata.notes) {
+          const notesBox = el('div','addr-panel-notes');
+          notesBox.style.cssText = 'font-size:0.83rem;color:var(--text-muted);font-style:italic;margin:0.3rem 0 0.75rem;';
+          notesBox.textContent = addr.metadata.notes;
+          c.appendChild(notesBox);
+        }
+
         // Last visit
         const lvBox = el('div','addr-last-visit');
         lvBox.appendChild(el('div','addr-last-label','Last Visit'));
@@ -2750,7 +2758,7 @@
 
     /* ── CSV Import / Export ──────────────────────────────── */
     function downloadTemplate() {
-      const csv = ['Road Name,Postcode,Address','Oak Street,SW1A 1AA,1','Oak Street,SW1A 1AA,2','Oak Street,SW1A 1AA,3','Elm Avenue,EC1A 1BB,14','Elm Avenue,EC1A 1BB,16'].join('\r\n');
+      const csv = ['Road Name,Postcode,Address,Notes','Oak Street,SW1A 1AA,1,','Oak Street,SW1A 1AA,2,Dog on premises','Oak Street,SW1A 1AA,3,','Elm Avenue,EC1A 1BB,14,Gate code 4471','Elm Avenue,EC1A 1BB,16,'].join('\r\n');
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
       a.download = 'road-visits-template.csv'; a.click();
@@ -2773,6 +2781,7 @@
         const dataLines = hasHeader ? lines.slice(1) : lines;
         const headerCols = hasHeader ? lines[0].split(',').map(c => c.trim().toLowerCase()) : [];
         const hasPostcode = headerCols.length >= 3 && headerCols[1].includes('post');
+        const hasNotes = hasPostcode && headerCols.length >= 4 && headerCols[3] && headerCols[3].includes('note');
 
         const roads = loadRoads(), addresses = loadAddresses();
         let newRoads = 0, newAddresses = 0;
@@ -2781,9 +2790,12 @@
         dataLines.forEach(line => {
           const parts = line.split(',');
           const roadName = (parts[0]||'').trim();
-          let postcode = '', addrValue = '';
-          if (hasPostcode) { postcode = (parts[1]||'').trim(); addrValue = parts.slice(2).join(',').trim(); }
-          else { addrValue = parts.slice(1).join(',').trim(); }
+          let postcode = '', addrValue = '', notesVal = '';
+          if (hasPostcode) {
+            postcode = (parts[1]||'').trim();
+            if (hasNotes) { addrValue = (parts[2]||'').trim(); notesVal = parts.slice(3).join(',').trim(); }
+            else { addrValue = parts.slice(2).join(',').trim(); }
+          } else { addrValue = parts.slice(1).join(',').trim(); }
           if (!roadName || !addrValue) return;
 
           let road = roads.find(r => r.name.toLowerCase() === roadName.toLowerCase() && r.locationId === currentLocId);
@@ -2792,7 +2804,7 @@
             roads.push(road); _syncCreateRoad(road); newRoads++;
           }
           if (!addresses.some(a => a.roadId === road.id && a.address.toLowerCase() === addrValue.toLowerCase())) {
-            const newAddr = {id:uid(),roadId:road.id,address:addrValue};
+            const newAddr = {id:uid(),roadId:road.id,address:addrValue,metadata: notesVal ? {notes:notesVal} : {}};
             addresses.push(newAddr); _syncCreateAddress(newAddr); newAddresses++;
           }
         });
@@ -3240,7 +3252,7 @@
       };
     }
     function mapDbAddress(r) {
-      return { id: r.id, roadId: r.road_id, address: r.address };
+      return { id: r.id, roadId: r.road_id, address: r.address, metadata: r.metadata || {} };
     }
     function mapDbVisit(r) {
       // Merge outcome + notes (stored separately in DB, combined in UI)
