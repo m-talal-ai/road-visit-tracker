@@ -2536,6 +2536,7 @@
         const notesEl = document.createElement('textarea');
         notesEl.className = 'modal-textarea'; notesEl.style.minHeight = '70px';
         notesEl.placeholder = 'Any additional details...';
+        if (addr && addr.metadata && addr.metadata.notes) notesEl.value = addr.metadata.notes;
         c.appendChild(notesEl);
 
         const outcomeErr = el('div','modal-error','Please select an outcome or add notes.');
@@ -2618,14 +2619,6 @@
       openModal(c => {
         c.appendChild(el('div','addr-panel-number', addr ? addr.address : ''));
         c.appendChild(el('div','addr-panel-road', road ? road.name + (road.postcode ? ' · ' + road.postcode : '') : ''));
-
-        // Notes (from CSV import metadata, only shown when present)
-        if (addr && addr.metadata && addr.metadata.notes) {
-          const notesBox = el('div','addr-panel-notes');
-          notesBox.style.cssText = 'font-size:0.83rem;color:var(--text-muted);font-style:italic;margin:0.3rem 0 0.75rem;';
-          notesBox.textContent = addr.metadata.notes;
-          c.appendChild(notesBox);
-        }
 
         // Last visit
         const lvBox = el('div','addr-last-visit');
