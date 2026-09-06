@@ -2512,7 +2512,7 @@
       const outcomes  = loadOutcomes();
       const settings  = loadSettings();
       const addr      = loadAddresses().find(a => a.id === addressId);
-      let selectedChip = '';
+      const selectedChips = new Set();
 
       openModal(c => {
         c.appendChild(el('h3','modal-title','Log Visit — ' + (addr ? addr.address : '')));
@@ -2524,8 +2524,8 @@
           const chip = el('button','outcome-chip', opt);
           chip.type = 'button';
           chip.addEventListener('click', () => {
-            selectedChip = selectedChip === opt ? '' : opt;
-            chipsWrap.querySelectorAll('.outcome-chip').forEach(ch => ch.classList.toggle('selected', ch.textContent === selectedChip));
+            if (selectedChips.has(opt)) selectedChips.delete(opt); else selectedChips.add(opt);
+            chipsWrap.querySelectorAll('.outcome-chip').forEach(ch => ch.classList.toggle('selected', selectedChips.has(ch.textContent)));
           });
           chipsWrap.appendChild(chip);
         });
@@ -2592,9 +2592,10 @@
         footer.appendChild(btn('btn-ghost','Cancel',closeModal));
         footer.appendChild(btn('btn-primary','Save Visit', () => {
           const notesVal = notesEl.value.trim();
-          if (!selectedChip && !notesVal) { outcomeErr.classList.add('visible'); return; }
+          if (!selectedChips.size && !notesVal) { outcomeErr.classList.add('visible'); return; }
           outcomeErr.classList.remove('visible');
-          const outcome = selectedChip ? (notesVal ? selectedChip + ' — ' + notesVal : selectedChip) : notesVal;
+          const chipsJoined = [...selectedChips].join(', ');
+          const outcome = chipsJoined ? (notesVal ? chipsJoined + ' — ' + notesVal : chipsJoined) : notesVal;
           const timestamp = dtIn.value ? new Date(dtIn.value).toISOString() : new Date().toISOString();
           const enteredBy = byIn.value.trim();
           if (enteredBy) { const s = loadSettings(); s.currentUser = enteredBy; saveSettings(s); }
