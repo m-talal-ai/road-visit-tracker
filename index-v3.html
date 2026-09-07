@@ -227,6 +227,26 @@
     .empty-state { grid-column:1/-1; padding:2.5rem 1.5rem; text-align:center; color:var(--text-muted); font-size:0.88rem; border:1px dashed var(--border); border-radius:var(--radius-lg); }
     .empty-state-hint { margin-top:0.35rem; font-size:0.78rem; color:var(--gold-dim); }
     .confirm-msg { font-size:0.92rem; color:var(--text); margin-bottom:1.35rem; line-height:1.6; }
+    .report-filters { display:flex; flex-direction:column; gap:0.85rem; margin-bottom:1.25rem; }
+    .report-filter-row { display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; }
+    .report-filter-row .modal-label { margin-bottom:0; white-space:nowrap; }
+    .report-preset-group { display:flex; gap:0.4rem; flex-wrap:wrap; }
+    .date-preset-btn.active { background:rgba(201,168,76,0.18); border-color:var(--gold); color:var(--gold); }
+    .report-custom-dates { display:flex; align-items:center; gap:0.5rem; }
+    .report-custom-dates .modal-input { width:auto; }
+    .report-summary-cards { display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+    .report-summary-card { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1rem 1.4rem; min-width:150px; }
+    .report-summary-card .num { font-size:1.6rem; font-weight:700; color:var(--gold); line-height:1.2; }
+    .report-summary-card .label { font-size:0.78rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-top:0.2rem; }
+    .report-person-table { margin-top:0.5rem; }
+    .report-person-row { display:flex; justify-content:space-between; padding:0.35rem 0; border-bottom:1px solid var(--border); font-size:0.85rem; }
+    .report-person-row:last-child { border-bottom:none; }
+    .report-breakdown-group { margin-bottom:1.5rem; }
+    .report-breakdown-title { font-size:0.95rem; font-weight:600; color:var(--gold-dim); margin-bottom:0.5rem; }
+    .report-table-wrap { overflow-x:auto; }
+    .report-table-row { display:grid; grid-template-columns:120px 140px 1fr 90px 1fr 1fr 120px; gap:0.75rem; padding:0.55rem 0.3rem; border-bottom:1px solid var(--border); font-size:0.82rem; align-items:start; min-width:820px; }
+    .report-table-row.head { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); border-bottom:1px solid var(--gold-dim); }
+    .report-table-row.no-location { grid-template-columns:120px 1fr 90px 1fr 1fr 120px; min-width:760px; }
 
     /* ── Utility ─────────────────────────────────────────────── */
     .hidden { display:none !important; }
@@ -331,6 +351,7 @@
       <button id="btn-view-list" class="vtbtn" title="List view">≡</button>
     </div>
     <button id="btn-theme-toggle" class="settings-btn" title="Toggle theme" style="font-size:1rem;">🌙</button>
+    <button id="btn-reports" class="settings-btn" title="Reports" style="font-size:1rem;">📊</button>
     <button id="btn-settings" class="settings-btn" title="Settings">&#9881;</button>
     <div class="user-pill">
       <span id="user-email" class="user-email"></span>
@@ -357,6 +378,14 @@
     <section id="view-addresses" class="hidden">
       <div id="addresses-view-header" class="view-header"></div>
       <div id="number-grid-container"></div>
+    </section>
+
+    <!-- VIEW: Reports -->
+    <section id="view-reports" class="hidden">
+      <div id="reports-view-header" class="view-header"></div>
+      <div id="reports-filters" class="report-filters"></div>
+      <div id="reports-summary" class="report-summary"></div>
+      <div id="reports-table-wrap" class="report-table-wrap"></div>
     </section>
   </main>
 
@@ -748,7 +777,7 @@
       if (!window._rvtDb || !window._rvtUserId) return;
       const place = window._rvtCache?.places?.find(p => p.id === r.locationId);
       const orgId = place?.orgId || null;
-      _syncWrite(() => window._rvtDb.from('roads').insert({
+      return _syncWrite(() => window._rvtDb.from('roads').insert({
         id: r.id, name: r.name, postcode: r.postcode || null,
         location_id: r.locationId || null,
         org_id: orgId,
@@ -771,7 +800,7 @@
       const road  = window._rvtCache?.roads?.find(r => r.id === a.roadId);
       const place = road ? window._rvtCache?.places?.find(p => p.id === road.locationId) : null;
       const orgId = place?.orgId || null;
-      _syncWrite(() => window._rvtDb.from('addresses').insert({
+      return _syncWrite(() => window._rvtDb.from('addresses').insert({
         id: a.id, road_id: a.roadId, address: a.address,
         org_id: orgId, metadata: a.metadata || {},
         owner_id: window._rvtUserId, created_by: window._rvtUserId,
@@ -789,7 +818,7 @@
       const place = road  ? window._rvtCache?.places?.find(p => p.id === road.locationId) : null;
       const orgId = place?.orgId || null;
       _syncWrite(() => window._rvtDb.from('visits').insert({
-        id: v.id, address_id: v.addressId, outcome: v.outcome,
+        id: v.id, address_id: v.addressId, outcome: v.outcome, notes: v.notes || null,
         visited_at: v.timestamp, entered_by_name: v.enteredBy || null,
         entered_by_user_id: window._rvtUserId,
         // visits has no org_id — access is derived via road.org_id in RLS
@@ -835,7 +864,7 @@
 
     /* ── State ────────────────────────────────────────────── */
     const state = {
-      view:             'places',   // 'places' | 'roads' | 'addresses'
+      view:             'places',   // 'places' | 'roads' | 'addresses' | 'reports'
       placeStack:       [],         // [{id, type, name}] — breadcrumb trail
       currentPlaceId:   null,       // place whose children we show (null = root)
       currentLocationId:null,        // location id for roads view ('__ungrouped__' for ungrouped)
@@ -844,6 +873,14 @@
       roadSort:         'last_visited_desc', // 'last_visited_desc'|'last_visited_asc'|'name_asc'
       search:           '',
       selectedRoadIds:  new Set(),  // roads selected for printing
+      report: {
+        scope:       null,   // locationId | '__ungrouped__' | 'combined' | 'breakdown' — set on first render
+        datePreset:  'this_month', // 'this_week' | 'this_month' | 'last_month' | 'all_time' | 'custom'
+        customStart: '',     // 'yyyy-mm-dd'
+        customEnd:   '',     // 'yyyy-mm-dd'
+        outcomes:    new Set(), // selected outcome labels
+        notesQuery:  '',
+      },
     };
 
     /* ── Navigation ───────────────────────────────────────── */
@@ -856,6 +893,10 @@
       state.placeStack = []; state.currentPlaceId = null;
       state.selectedRoadIds.clear();
       state.view = 'places'; clearSearch(); render();
+    }
+
+    function navigateToReports() {
+      state.view = 'reports'; clearSearch(); render();
     }
 
     function navigateIntoPlace(place) {
@@ -960,6 +1001,105 @@
       const visits = loadVisits().filter(v => addrIds.has(v.addressId));
       if (!visits.length) return null;
       return visits.sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp))[0];
+    }
+    function visitDisplayText(v) {
+      return [v.outcome, v.notes].filter(Boolean).join(' — ');
+    }
+    function getReportScopeInfo() {
+      const locations = loadPlaces().filter(p => p.type === 'location').map(p => ({ id: p.id, name: p.name }));
+      const hasUngrouped = loadRoads().some(r => !r.locationId);
+      return { locations, hasUngrouped };
+    }
+    function resolveScopeRoadIds(scope) {
+      if (scope === '__ungrouped__') return new Set(loadRoads().filter(r => !r.locationId).map(r => r.id));
+      if (scope === 'combined' || scope === 'breakdown') return new Set(loadRoads().map(r => r.id));
+      return new Set(loadRoads().filter(r => r.locationId === scope).map(r => r.id));
+    }
+    function getBreakdownGroups() {
+      const { locations, hasUngrouped } = getReportScopeInfo();
+      const groups = locations.map(loc => ({
+        id: loc.id, label: loc.name,
+        roadIds: new Set(loadRoads().filter(r => r.locationId === loc.id).map(r => r.id)),
+      }));
+      if (hasUngrouped) {
+        groups.push({ id: '__ungrouped__', label: 'Ungrouped', roadIds: new Set(loadRoads().filter(r => !r.locationId).map(r => r.id)) });
+      }
+      return groups;
+    }
+    function computeReportDateRange() {
+      const now = new Date();
+      const startOfDay = d => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+      const endOfDay   = d => { const x = new Date(d); x.setHours(23,59,59,999); return x.getTime(); };
+      const preset = state.report.datePreset;
+      if (preset === 'this_week') {
+        const day = now.getDay();
+        const diffToMonday = (day === 0 ? 6 : day - 1);
+        const monday = new Date(now); monday.setDate(now.getDate() - diffToMonday);
+        return { start: startOfDay(monday), end: endOfDay(now) };
+      }
+      if (preset === 'this_month') {
+        const first = new Date(now.getFullYear(), now.getMonth(), 1);
+        return { start: startOfDay(first), end: endOfDay(now) };
+      }
+      if (preset === 'last_month') {
+        const firstLast = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastLast  = new Date(now.getFullYear(), now.getMonth(), 0);
+        return { start: startOfDay(firstLast), end: endOfDay(lastLast) };
+      }
+      if (preset === 'custom') {
+        const parseLocalDate = str => {
+          const [y, m, d] = str.split('-').map(Number);
+          return new Date(y, m - 1, d);
+        };
+        const start = state.report.customStart ? startOfDay(parseLocalDate(state.report.customStart)) : null;
+        const end   = state.report.customEnd   ? endOfDay(parseLocalDate(state.report.customEnd))     : null;
+        return { start, end };
+      }
+      return { start: null, end: null }; // 'all_time'
+    }
+    function getReportFilteredData(roadIds) {
+      const { start, end } = computeReportDateRange();
+      const addresses = loadAddresses().filter(a => roadIds.has(a.roadId));
+      const addrById = new Map(addresses.map(a => [a.id, a]));
+      const q = state.report.notesQuery.trim().toLowerCase();
+      const outcomeSet = state.report.outcomes;
+
+      const visits = loadVisits().filter(v => {
+        const addr = addrById.get(v.addressId);
+        if (!addr) return false;
+        const t = new Date(v.timestamp).getTime();
+        if (start !== null && t < start) return false;
+        if (end !== null && t > end) return false;
+        if (outcomeSet.size) {
+          const vOutcomes = (v.outcome || '').split(' — ')[0].split(',').map(s => s.trim()).filter(Boolean);
+          if (!vOutcomes.some(o => outcomeSet.has(o))) return false;
+        }
+        if (q) {
+          const inVisitNotes = (v.notes || '').toLowerCase().includes(q);
+          const inAddrNotes  = (addr.metadata?.notes || '').toLowerCase().includes(q);
+          if (!inVisitNotes && !inAddrNotes) return false;
+        }
+        return true;
+      }).map(v => ({ ...v, address: addrById.get(v.addressId) }));
+
+      const addressesAdded = addresses.filter(a => {
+        if (!a.createdAt) return false;
+        const t = new Date(a.createdAt).getTime();
+        if (start !== null && t < start) return false;
+        if (end !== null && t > end) return false;
+        return true;
+      }).length;
+
+      const byPerson = new Map();
+      visits.forEach(v => {
+        const name = v.enteredBy || 'Unknown';
+        byPerson.set(name, (byPerson.get(name) || 0) + 1);
+      });
+      const personRows = [...byPerson.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a,b) => b.count - a.count);
+
+      return { visits, addressesAdded, personRows };
     }
     function formatDateShort(iso) {
       if (!iso) return '';
@@ -1623,7 +1763,7 @@
             const tile = document.createElement('button');
             tile.className = 'number-tile' + (lv ? ' visited' : '');
             tile.textContent = addr.address;
-            tile.title = lv ? 'Last: ' + lv.outcome : 'No visits yet';
+            tile.title = lv ? 'Last: ' + visitDisplayText(lv) : 'No visits yet';
             tile.addEventListener('click', () => openAddressPanel(addr.id));
             tiles.appendChild(tile);
           });
@@ -1631,6 +1771,233 @@
           wrap.appendChild(row);
         });
       container.appendChild(wrap);
+    }
+
+    /* ── Render Reports ───────────────────────────────────── */
+    function renderReports() {
+      const hdr = document.getElementById('reports-view-header');
+      hdr.innerHTML = '';
+      hdr.appendChild(el('h2','view-title','Reports'));
+      hdr.appendChild(btn('btn-ghost btn-sm','← Back', navigateToRoot));
+
+      const { locations, hasUngrouped } = getReportScopeInfo();
+      const totalScopes = locations.length + (hasUngrouped ? 1 : 0);
+
+      // Default scope: single location/ungrouped if there's only one, else combined
+      if (!state.report.scope) {
+        if (totalScopes === 1) {
+          state.report.scope = locations.length ? locations[0].id : '__ungrouped__';
+        } else {
+          state.report.scope = 'combined';
+        }
+      }
+
+      renderReportScopeSelector(locations, hasUngrouped, totalScopes);
+      renderReportDateFilter();
+      renderReportOutcomeFilter();
+      renderReportNotesFilter();
+
+      renderReportResults();
+    }
+
+    function renderReportResults() {
+      const { visits } = renderReportSummary();
+      renderReportTable(visits);
+    }
+
+    function renderReportScopeSelector(locations, hasUngrouped, totalScopes) {
+      const filtersEl = document.getElementById('reports-filters');
+      filtersEl.innerHTML = '';
+      if (totalScopes <= 1) return; // nothing to choose between
+
+      const wrap = el('div','report-filter-row');
+      wrap.appendChild(el('label','modal-label','Location'));
+      const sel = document.createElement('select');
+      sel.className = 'modal-input';
+      sel.style.maxWidth = '260px';
+      const opts = [
+        { value:'combined', label:'All my locations (combined)' },
+        { value:'breakdown', label:'All my locations (breakdown)' },
+        ...locations.map(l => ({ value:l.id, label:l.name })),
+      ];
+      if (hasUngrouped) opts.push({ value:'__ungrouped__', label:'Ungrouped' });
+      opts.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.value; opt.textContent = o.label;
+        if (o.value === state.report.scope) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => {
+        state.report.scope = sel.value;
+        renderReports();
+      });
+      wrap.appendChild(sel);
+      filtersEl.appendChild(wrap);
+    }
+    function renderReportDateFilter() {
+      const filtersEl = document.getElementById('reports-filters');
+      const wrap = el('div','report-filter-row');
+      wrap.appendChild(el('label','modal-label','Date Range'));
+
+      const presetsWrap = el('div','report-preset-group');
+      const presets = [
+        { value:'this_week', label:'This Week' },
+        { value:'this_month', label:'This Month' },
+        { value:'last_month', label:'Last Month' },
+        { value:'all_time', label:'All Time' },
+        { value:'custom', label:'Custom' },
+      ];
+      presets.forEach(p => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-ghost btn-sm date-preset-btn' + (state.report.datePreset === p.value ? ' active' : '');
+        b.textContent = p.label;
+        b.addEventListener('click', () => { state.report.datePreset = p.value; renderReports(); });
+        presetsWrap.appendChild(b);
+      });
+      wrap.appendChild(presetsWrap);
+
+      if (state.report.datePreset === 'custom') {
+        const customWrap = el('div','report-custom-dates');
+        const startIn = document.createElement('input');
+        startIn.type = 'date'; startIn.className = 'modal-input'; startIn.value = state.report.customStart;
+        startIn.addEventListener('change', () => { state.report.customStart = startIn.value; renderReports(); });
+        const endIn = document.createElement('input');
+        endIn.type = 'date'; endIn.className = 'modal-input'; endIn.value = state.report.customEnd;
+        endIn.addEventListener('change', () => { state.report.customEnd = endIn.value; renderReports(); });
+        customWrap.appendChild(startIn);
+        customWrap.appendChild(el('span','', ' to '));
+        customWrap.appendChild(endIn);
+        wrap.appendChild(customWrap);
+      }
+
+      filtersEl.appendChild(wrap);
+    }
+    function renderReportOutcomeFilter() {
+      const filtersEl = document.getElementById('reports-filters');
+      const wrap = el('div','report-filter-row');
+      wrap.appendChild(el('label','modal-label','Outcome'));
+      const chipsWrap = el('div','outcome-chips');
+      loadOutcomes().forEach(opt => {
+        const chip = el('button','outcome-chip' + (state.report.outcomes.has(opt) ? ' selected' : ''), opt);
+        chip.type = 'button';
+        chip.addEventListener('click', () => {
+          if (state.report.outcomes.has(opt)) state.report.outcomes.delete(opt);
+          else state.report.outcomes.add(opt);
+          renderReports();
+        });
+        chipsWrap.appendChild(chip);
+      });
+      wrap.appendChild(chipsWrap);
+      filtersEl.appendChild(wrap);
+    }
+    function renderReportNotesFilter() {
+      const filtersEl = document.getElementById('reports-filters');
+      const wrap = el('div','report-filter-row');
+      wrap.appendChild(el('label','modal-label','Notes contain'));
+      const input = document.createElement('input');
+      input.type = 'text'; input.className = 'modal-input'; input.style.maxWidth = '260px';
+      input.placeholder = 'e.g. dog, gate code...';
+      input.value = state.report.notesQuery;
+      input.addEventListener('input', () => { state.report.notesQuery = input.value; renderReportResults(); });
+      wrap.appendChild(input);
+      filtersEl.appendChild(wrap);
+    }
+
+    function renderReportSummaryCards(container, addressesAdded, visitCount, personRows) {
+      const cards = el('div','report-summary-cards');
+      const addCard = (num, label) => {
+        const c = el('div','report-summary-card');
+        c.appendChild(el('div','num', String(num)));
+        c.appendChild(el('div','label', label));
+        cards.appendChild(c);
+      };
+      addCard(addressesAdded, 'Addresses Added');
+      addCard(visitCount, 'Visits Logged');
+      container.appendChild(cards);
+
+      if (personRows.length) {
+        const personWrap = el('div','report-person-table');
+        personWrap.appendChild(el('div','modal-label','By Person'));
+        personRows.forEach(p => {
+          const row = el('div','report-person-row');
+          row.appendChild(el('span','', p.name));
+          row.appendChild(el('span','', String(p.count)));
+          personWrap.appendChild(row);
+        });
+        container.appendChild(personWrap);
+      }
+    }
+
+    function renderReportSummary() {
+      const container = document.getElementById('reports-summary');
+      container.innerHTML = '';
+
+      if (state.report.scope !== 'breakdown') {
+        const roadIds = resolveScopeRoadIds(state.report.scope);
+        const { visits, addressesAdded, personRows } = getReportFilteredData(roadIds);
+        renderReportSummaryCards(container, addressesAdded, visits.length, personRows);
+        return { visits }; // returned so renderReports() can pass it to the table step (Task 8)
+      }
+
+      // Breakdown mode: combined total row, then one row per group
+      const groups = getBreakdownGroups();
+      const perGroup = groups.map(g => ({ group: g, data: getReportFilteredData(g.roadIds) }));
+      const allRoadIds = resolveScopeRoadIds('combined');
+      const combined = getReportFilteredData(allRoadIds);
+
+      const totalWrap = el('div','report-breakdown-group');
+      totalWrap.appendChild(el('div','report-breakdown-title','All Locations (Total)'));
+      renderReportSummaryCards(totalWrap, combined.addressesAdded, combined.visits.length, combined.personRows);
+      container.appendChild(totalWrap);
+
+      perGroup.forEach(({ group, data }) => {
+        const groupWrap = el('div','report-breakdown-group');
+        groupWrap.appendChild(el('div','report-breakdown-title', group.label));
+        renderReportSummaryCards(groupWrap, data.addressesAdded, data.visits.length, data.personRows);
+        container.appendChild(groupWrap);
+      });
+
+      return { visits: combined.visits };
+    }
+
+    function renderReportTable(visits) {
+      const wrap = document.getElementById('reports-table-wrap');
+      wrap.innerHTML = '';
+
+      if (!visits.length) {
+        const empty = el('div','empty-state');
+        empty.innerHTML = '<div>No visits match the current filters.</div>';
+        wrap.appendChild(empty);
+        return;
+      }
+
+      const showLocation = state.report.scope === 'combined' || state.report.scope === 'breakdown';
+      const roadsById = new Map(loadRoads().map(r => [r.id, r]));
+      const placesById = new Map(loadPlaces().map(p => [p.id, p]));
+
+      const rowClass = 'report-table-row' + (showLocation ? '' : ' no-location');
+      const head = el('div', rowClass + ' head');
+      const headers = showLocation
+        ? ['Date','Location','Road','Address','Outcome(s)','Notes','Entered By']
+        : ['Date','Road','Address','Outcome(s)','Notes','Entered By'];
+      headers.forEach(h => head.appendChild(el('div','', h)));
+      wrap.appendChild(head);
+
+      const sorted = [...visits].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+      sorted.forEach(v => {
+        const road = v.address ? roadsById.get(v.address.roadId) : null;
+        const locName = road && road.locationId ? (placesById.get(road.locationId)?.name || '') : (road ? 'Ungrouped' : '');
+        const row = el('div', rowClass);
+        row.appendChild(el('div','', formatDateShort(v.timestamp)));
+        if (showLocation) row.appendChild(el('div','', locName));
+        row.appendChild(el('div','', road ? road.name : ''));
+        row.appendChild(el('div','', v.address ? v.address.address : ''));
+        row.appendChild(el('div','', v.outcome || ''));
+        row.appendChild(el('div','', v.notes || ''));
+        row.appendChild(el('div','', v.enteredBy || ''));
+        wrap.appendChild(row);
+      });
     }
 
     /* ── Master Render ────────────────────────────────────── */
@@ -1644,10 +2011,12 @@
       document.getElementById('view-places').classList.toggle('hidden',    state.view !== 'places');
       document.getElementById('view-roads').classList.toggle('hidden',     state.view !== 'roads');
       document.getElementById('view-addresses').classList.toggle('hidden', state.view !== 'addresses');
+      document.getElementById('view-reports').classList.toggle('hidden',   state.view !== 'reports');
 
-      if (state.view === 'places')    renderPlaces();
-      else if (state.view === 'roads') renderRoads();
-      else                             renderAddresses();
+      if (state.view === 'places')         renderPlaces();
+      else if (state.view === 'roads')     renderRoads();
+      else if (state.view === 'addresses') renderAddresses();
+      else if (state.view === 'reports')   renderReports();
 
       // Populate header location selector
       const sel = document.getElementById('location-selector');
@@ -2497,7 +2866,7 @@
           if (addresses.some(a => a.roadId === roadId && a.address.toLowerCase() === address.toLowerCase())) {
             dupErr.classList.add('visible'); return;
           }
-          const newAddr = { id:uid(), roadId, address };
+          const newAddr = { id:uid(), roadId, address, createdAt:new Date().toISOString() };
           addresses.push(newAddr);
           saveAddresses(addresses);
           _syncCreateAddress(newAddr);
@@ -2594,13 +2963,12 @@
           const notesVal = notesEl.value.trim();
           if (!selectedChips.size && !notesVal) { outcomeErr.classList.add('visible'); return; }
           outcomeErr.classList.remove('visible');
-          const chipsJoined = [...selectedChips].join(', ');
-          const outcome = chipsJoined ? (notesVal ? chipsJoined + ' — ' + notesVal : chipsJoined) : notesVal;
+          const outcome = [...selectedChips].join(', ');
           const timestamp = dtIn.value ? new Date(dtIn.value).toISOString() : new Date().toISOString();
           const enteredBy = byIn.value.trim();
           if (enteredBy) { const s = loadSettings(); s.currentUser = enteredBy; saveSettings(s); }
           const visits = loadVisits();
-          const newVisit = { id:uid(), addressId, outcome, timestamp, enteredBy };
+          const newVisit = { id:uid(), addressId, outcome, notes: notesVal, timestamp, enteredBy };
           visits.push(newVisit);
           saveVisits(visits);
           _syncCreateVisit(newVisit);
@@ -2625,7 +2993,7 @@
         const lvBox = el('div','addr-last-visit');
         lvBox.appendChild(el('div','addr-last-label','Last Visit'));
         if (lv) {
-          lvBox.appendChild(el('div','addr-last-outcome', lv.outcome));
+          lvBox.appendChild(el('div','addr-last-outcome', visitDisplayText(lv)));
           lvBox.appendChild(el('div','addr-last-meta', formatDate(lv.timestamp) + (lv.enteredBy ? ' · by ' + lv.enteredBy : '')));
         } else {
           const none = el('div','','No visits yet.');
@@ -2681,7 +3049,7 @@
       visits.forEach(v => {
         const li = el('li','history-item');
         li.appendChild(el('div','history-item-date', formatDate(v.timestamp)));
-        li.appendChild(el('div','history-item-outcome', v.outcome));
+        li.appendChild(el('div','history-item-outcome', visitDisplayText(v)));
         if (v.enteredBy) li.appendChild(el('div','history-item-by','By: ' + v.enteredBy));
         ul.appendChild(li);
       });
@@ -2767,7 +3135,7 @@
 
     function importCSV(file) {
       const reader = new FileReader();
-      reader.onload = e => {
+      reader.onload = async e => {
         const lines = e.target.result.split(/\r?\n/).map(l => l.trim()).filter(l => l);
         if (!lines.length) { showImportFeedback('File is empty.','error'); return; }
         const first = lines[0].toLowerCase();
@@ -2779,8 +3147,9 @@
 
         const roads = loadRoads(), addresses = loadAddresses();
         let newRoads = 0, newAddresses = 0;
+        const newRoadObjs = [], newAddrObjs = [];
 
-        const currentLocId = state.currentLocationId || null;
+        const currentLocId = (state.currentLocationId && state.currentLocationId !== '__ungrouped__') ? state.currentLocationId : null;
         dataLines.forEach(line => {
           const parts = line.split(',');
           const roadName = (parts[0]||'').trim();
@@ -2795,16 +3164,21 @@
           let road = roads.find(r => r.name.toLowerCase() === roadName.toLowerCase() && r.locationId === currentLocId);
           if (!road) {
             road = {id:uid(),name:roadName,postcode,locationId:currentLocId,tags:[],createdAt:new Date().toISOString()};
-            roads.push(road); _syncCreateRoad(road); newRoads++;
+            roads.push(road); newRoadObjs.push(road); newRoads++;
           }
           if (!addresses.some(a => a.roadId === road.id && a.address.toLowerCase() === addrValue.toLowerCase())) {
-            const newAddr = {id:uid(),roadId:road.id,address:addrValue,metadata: notesVal ? {notes:notesVal} : {}};
-            addresses.push(newAddr); _syncCreateAddress(newAddr); newAddresses++;
+            const newAddr = {id:uid(),roadId:road.id,address:addrValue,metadata: notesVal ? {notes:notesVal} : {}, createdAt:new Date().toISOString()};
+            addresses.push(newAddr); newAddrObjs.push(newAddr); newAddresses++;
           }
         });
 
         saveRoads(roads); saveAddresses(addresses); render();
         showImportFeedback(`Imported ${newRoads} road${newRoads!==1?'s':''} and ${newAddresses} address${newAddresses!==1?'es':''}.`,'success');
+
+        // Roads must finish saving to Supabase before their addresses sync,
+        // since addresses.road_id has a foreign-key constraint on roads.id.
+        await Promise.all(newRoadObjs.map(r => _syncCreateRoad(r)));
+        newAddrObjs.forEach(a => _syncCreateAddress(a));
       };
       reader.onerror = () => showImportFeedback('Could not read file.','error');
       reader.readAsText(file);
@@ -2824,6 +3198,7 @@
       });
 
       document.getElementById('btn-settings').addEventListener('click', openSettingsModal);
+      document.getElementById('btn-reports').addEventListener('click', navigateToReports);
 
       document.getElementById('btn-theme-toggle').addEventListener('click', () => {
         const current = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -3246,14 +3621,13 @@
       };
     }
     function mapDbAddress(r) {
-      return { id: r.id, roadId: r.road_id, address: r.address, metadata: r.metadata || {} };
+      return { id: r.id, roadId: r.road_id, address: r.address, metadata: r.metadata || {}, createdAt: r.created_at };
     }
     function mapDbVisit(r) {
-      // Merge outcome + notes (stored separately in DB, combined in UI)
-      const outcomeText = [r.outcome, r.notes].filter(Boolean).join(' — ');
       return {
         id: r.id, addressId: r.address_id,
-        outcome:   outcomeText,
+        outcome:   r.outcome || '',
+        notes:     r.notes || '',
         timestamp: r.visited_at,
         enteredBy: r.entered_by_name || '',
       };
@@ -3277,33 +3651,36 @@
         cache.places = uniqueLocs.map(mapDbPlace);
         const locIds = [...new Set(uniqueLocs.map(l => l.id))];
 
-        if (locIds.length) {
-          // 2. Roads (parallel per location, deduplicate by road id)
-          const roadArrays = await Promise.all(locIds.map(id => Roads.getByLocation(id)));
-          const seenRoad = new Set();
-          const allDbRoads = roadArrays.flat().filter(r => { if (seenRoad.has(r.id)) return false; seenRoad.add(r.id); return true; });
-          cache.roads = allDbRoads.map(mapDbRoad);
-          const roadIds = allDbRoads.map(r => r.id);
+        // 2. Roads: per-location + this user's ungrouped roads (parallel, deduplicated)
+        const [roadArrays, ungroupedRoads] = await Promise.all([
+          Promise.all(locIds.map(id => Roads.getByLocation(id))),
+          Roads.getUngroupedByUser().catch(() => []),
+        ]);
+        const seenRoad = new Set();
+        const allDbRoads = [...roadArrays.flat(), ...ungroupedRoads].filter(r => { if (seenRoad.has(r.id)) return false; seenRoad.add(r.id); return true; });
+        cache.roads = allDbRoads.map(mapDbRoad);
+        const roadIds = allDbRoads.map(r => r.id);
 
-          if (roadIds.length) {
-            // 3. Addresses
-            const { data: addrData } = await db
-              .from('addresses').select('*')
-              .in('road_id', roadIds).is('deleted_at', null);
-            cache.addresses = (addrData || []).map(mapDbAddress);
+        if (roadIds.length) {
+          // 3. Addresses
+          const { data: addrData } = await db
+            .from('addresses').select('*')
+            .in('road_id', roadIds).is('deleted_at', null);
+          cache.addresses = (addrData || []).map(mapDbAddress);
 
-            // 4. Visits (need address IDs first)
-            const addrIds = (addrData || []).map(a => a.id);
-            if (addrIds.length) {
-              const { data: visitData } = await db
-                .from('visits').select('*')
-                .in('address_id', addrIds)
-                .is('deleted_at', null)
-                .order('visited_at', { ascending: false });
-              cache.visits = (visitData || []).map(mapDbVisit);
-            }
+          // 4. Visits (need address IDs first)
+          const addrIds = (addrData || []).map(a => a.id);
+          if (addrIds.length) {
+            const { data: visitData } = await db
+              .from('visits').select('*')
+              .in('address_id', addrIds)
+              .is('deleted_at', null)
+              .order('visited_at', { ascending: false });
+            cache.visits = (visitData || []).map(mapDbVisit);
           }
+        }
 
+        if (locIds.length) {
           // 4. Tags + assignments (parallel per location)
           const [tagArrays, assignArrays] = await Promise.all([
             Promise.all(locIds.map(id => Tags.list(id))),
